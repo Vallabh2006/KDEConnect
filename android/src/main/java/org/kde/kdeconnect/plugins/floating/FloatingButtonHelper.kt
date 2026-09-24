@@ -7,8 +7,11 @@
 package org.kde.kdeconnect.plugins.floating
 
 import android.app.Activity
+import android.app.StatusBarManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -64,6 +67,7 @@ object FloatingButtonHelper {
 
     fun startFloatingButton(context: Context) {
         if (!hasOverlayPermission(context)) {
+            Toast.makeText(context, R.string.overlay_permission_message, Toast.LENGTH_LONG).show()
             return
         }
         val intent = Intent(context, FloatingButtonService::class.java).apply {
@@ -101,25 +105,60 @@ object FloatingButtonHelper {
         }
     }
 
+    fun requestAddQuickSettingsTile(activity: Activity) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val statusBarManager = activity.getSystemService(StatusBarManager::class.java)
+            val componentName = ComponentName(activity, FloatingTileService::class.java)
+            statusBarManager?.requestAddTileService(
+                componentName,
+                activity.getString(R.string.floating_tile_label),
+                Icon.createWithResource(activity, R.drawable.ic_floating_button),
+                activity.mainExecutor
+            ) { result ->
+                if (result == StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED) {
+                    Toast.makeText(activity, R.string.tile_added_success, Toast.LENGTH_SHORT).show()
+                }
+            }
+        } else {
+            Toast.makeText(activity, "To add Quick Settings tile, swipe down your notification tray, tap edit (pencil icon), and drag Floating Controls to active tiles.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     fun showOptionsDialog(activity: FragmentActivity) {
         val isRunning = isServiceRunning()
-        val items = arrayOf(
-            if (isRunning) activity.getString(R.string.floating_button_disabled) else activity.getString(R.string.floating_button_enabled),
+        val toggleLabel = if (isRunning) {
+            activity.getString(R.string.disable_floating_button)
+        } else {
+            activity.getString(R.string.enable_floating_button)
+        }
+
+        val items = mutableListOf(
+            toggleLabel,
             activity.getString(R.string.customize_floating_button)
         )
 
+        val hasQsAdd = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+        if (hasQsAdd) {
+            items.add(activity.getString(R.string.add_tile_to_quick_settings))
+        }
+
         MaterialAlertDialogBuilder(activity)
             .setTitle(R.string.floating_action_button)
-            .setItems(items) { _, which ->
+            .setItems(items.toTypedArray()) { _, which ->
                 when (which) {
                     0 -> {
                         checkAndRequestPermission(activity) {
                             toggleFloatingButton(activity)
-                            val msg = if (isServiceRunning()) R.string.floating_button_disabled else R.string.floating_button_enabled
-                            Toast.makeText(activity, msg, Toast.LENGTH_SHORT).show()
+                            val feedbackMsg = if (isRunning) {
+                                R.string.floating_button_disabled
+                            } else {
+                                R.string.floating_button_enabled
+                            }
+                            Toast.makeText(activity, feedbackMsg, Toast.LENGTH_SHORT).show()
                         }
                     }
                     1 -> showCustomizationDialog(activity)
+                    2 -> requestAddQuickSettingsTile(activity)
                 }
             }
             .setNegativeButton(android.R.string.cancel, null)

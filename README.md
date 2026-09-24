@@ -58,7 +58,9 @@ Transfer and install the APK on your device:
 
 Or install directly via USB / ADB:
 ```bash
-adb install -r apk/KDEConnect.apk
+adb install -r apk/kdeconnect-android-debug.apk
+# If adb is in Android SDK platform-tools:
+~/Android/Sdk/platform-tools/adb install -r apk/kdeconnect-android-debug.apk
 ```
 
 ---

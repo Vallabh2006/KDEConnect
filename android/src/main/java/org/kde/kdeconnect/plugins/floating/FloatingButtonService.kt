@@ -13,11 +13,14 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
 import android.util.DisplayMetrics
+import android.util.Log
+import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.LayoutInflater
@@ -30,6 +33,7 @@ import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import com.google.android.material.card.MaterialCardView
 import org.kde.kdeconnect.Device
 import org.kde.kdeconnect.KdeConnect
@@ -46,7 +50,6 @@ import org.kde.kdeconnect.plugins.taskmanager.TaskManagerActivity
 import org.kde.kdeconnect.plugins.terminal.TerminalActivity
 import org.kde.kdeconnect.ui.MainActivity
 import org.kde.kdeconnect_tp.R
-import kotlin.math.abs
 import kotlin.math.hypot
 
 class FloatingButtonService : Service() {
@@ -63,6 +66,7 @@ class FloatingButtonService : Service() {
     private var screenWidth = 0
     private var screenHeight = 0
     private var isOverDismissZone = false
+    private var isMenuShowing = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -72,11 +76,33 @@ class FloatingButtonService : Service() {
         updateScreenDimensions()
         isRunning = true
 
-        startForeground(NOTIFICATION_ID, createNotification())
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ServiceCompat.startForeground(
+                    this,
+                    NOTIFICATION_ID,
+                    createNotification(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, createNotification())
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error starting foreground service", e)
+        }
 
-        setupBubbleView()
-        setupDismissView()
-        setupMenuView()
+        try {
+            val themedContext = ContextThemeWrapper(this, R.style.KdeConnectTheme)
+            val inflater = LayoutInflater.from(themedContext)
+
+            setupBubbleView(inflater)
+            setupDismissView(inflater)
+            setupMenuView(inflater)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error initializing floating views", e)
+            Toast.makeText(this, "Error creating floating button: ${e.message}", Toast.LENGTH_LONG).show()
+            stopSelf()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -134,9 +160,8 @@ class FloatingButtonService : Service() {
             .build()
     }
 
-    @SuppressLint("InflateParams", "ClickableViewAccessibility")
-    private fun setupBubbleView() {
-        val inflater = LayoutInflater.from(this)
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupBubbleView(inflater: LayoutInflater) {
         bubbleView = inflater.inflate(R.layout.floating_bubble_layout, null)
 
         val density = resources.displayMetrics.density
@@ -225,13 +250,11 @@ class FloatingButtonService : Service() {
         try {
             windowManager.addView(bubbleView, bubbleParams)
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Failed to add bubbleView to WindowManager", e)
         }
     }
 
-    @SuppressLint("InflateParams")
-    private fun setupDismissView() {
-        val inflater = LayoutInflater.from(this)
+    private fun setupDismissView(inflater: LayoutInflater) {
         dismissView = inflater.inflate(R.layout.floating_dismiss_layout, null)
 
         val density = resources.displayMetrics.density
@@ -254,13 +277,11 @@ class FloatingButtonService : Service() {
             windowManager.addView(dismissView, dismissParams)
             dismissView?.visibility = View.GONE
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Failed to add dismissView to WindowManager", e)
         }
     }
 
-    @SuppressLint("InflateParams")
-    private fun setupMenuView() {
-        val inflater = LayoutInflater.from(this)
+    private fun setupMenuView(inflater: LayoutInflater) {
         menuOverlayView = inflater.inflate(R.layout.floating_menu_layout, null)
 
         menuParams = WindowManager.LayoutParams(
@@ -268,7 +289,7 @@ class FloatingButtonService : Service() {
             WindowManager.LayoutParams.MATCH_PARENT,
             getOverlayType(),
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.CENTER
@@ -276,6 +297,10 @@ class FloatingButtonService : Service() {
 
         menuOverlayView?.findViewById<View>(R.id.floating_menu_overlay_root)?.setOnClickListener {
             hideMenu()
+        }
+
+        menuOverlayView?.findViewById<View>(R.id.floating_menu_card)?.setOnClickListener {
+            // Consume touch so card background doesn't close menu
         }
 
         menuOverlayView?.findViewById<View>(R.id.btn_menu_close)?.setOnClickListener {
@@ -359,8 +384,6 @@ class FloatingButtonService : Service() {
         }
     }
 
-    private var isMenuShowing = false
-
     private fun showMenu() {
         if (isMenuShowing || menuOverlayView == null) return
 
@@ -379,7 +402,7 @@ class FloatingButtonService : Service() {
             card?.alpha = 0f
             card?.animate()?.scaleX(1f)?.scaleY(1f)?.alpha(1f)?.setDuration(180)?.start()
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Failed to add menuOverlayView to WindowManager", e)
         }
     }
 
@@ -401,7 +424,8 @@ class FloatingButtonService : Service() {
         grid.removeAllViews()
 
         val enabledActions = FloatingButtonHelper.getEnabledActions(this)
-        val inflater = LayoutInflater.from(this)
+        val themedContext = ContextThemeWrapper(this, R.style.KdeConnectTheme)
+        val inflater = LayoutInflater.from(themedContext)
 
         for (action in enabledActions) {
             val itemView = inflater.inflate(R.layout.item_floating_action, grid, false)
@@ -478,6 +502,7 @@ class FloatingButtonService : Service() {
     }
 
     companion object {
+        private const val TAG = "FloatingButtonService"
         const val ACTION_START = "org.kde.kdeconnect.floating.ACTION_START"
         const val ACTION_STOP = "org.kde.kdeconnect.floating.ACTION_STOP"
         const val EXTRA_DEVICE_ID = "deviceId"

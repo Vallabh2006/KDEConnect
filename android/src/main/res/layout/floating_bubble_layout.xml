@@ -2,9 +2,11 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/floating_bubble_root"
-    android:layout_width="wrap_content"
-    android:layout_height="wrap_content"
-    android:padding="8dp">
+    android:layout_width="96dp"
+    android:layout_height="96dp"
+    android:padding="20dp"
+    android:clipChildren="false"
+    android:clipToPadding="false">
 
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/floating_bubble_card"
@@ -12,18 +14,19 @@
         android:layout_height="56dp"
         android:layout_gravity="center"
         app:cardCornerRadius="28dp"
-        app:cardElevation="6dp"
+        app:cardElevation="8dp"
         app:cardBackgroundColor="@color/launcher_background"
-        app:strokeWidth="1.5dp"
-        app:strokeColor="#40FFFFFF">
+        app:strokeWidth="2dp"
+        app:strokeColor="#8038bdf8"
+        android:clickable="false"
+        android:focusable="false">
 
         <ImageView
             android:id="@+id/floating_bubble_icon"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
             android:layout_gravity="center"
-            android:src="@drawable/ic_device_laptop_32dp"
-            app:tint="#FFFFFF"
+            android:src="@drawable/icon"
             android:contentDescription="@string/floating_action_button" />
 
     </com.google.android.material.card.MaterialCardView>

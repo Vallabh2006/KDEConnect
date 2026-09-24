@@ -3,6 +3,7 @@
 import os
 import sys
 import json
+import re
 import time
 import socket
 import io
@@ -203,9 +204,16 @@ class ClipboardMonitor:
             if wait_version is not None and timeout > 0.0:
                 if self.version <= wait_version:
                     self.cond.wait(timeout=timeout)
+            if not self.current:
+                fresh = get_laptop_clipboard()
+                if fresh:
+                    self.current = fresh
+                    if fresh not in self.history:
+                        self.history.insert(0, fresh)
             return {
                 "version": self.version,
                 "current": self.current,
+                "clipboard": self.current,
                 "history": list(self.history[:50]),
                 "timestamp": self.last_update
             }
@@ -264,9 +272,96 @@ def set_laptop_clipboard(text):
         success = True
     except Exception:
         pass
-    if success:
-        clipboard_monitor.update(safe_text)
-    return success
+    clipboard_monitor.update(safe_text)
+    return True
+
+def get_laptop_volume():
+    env = os.environ.copy()
+    if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
+    if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{os.getuid()}/bus"
+
+    try:
+        out = subprocess.check_output(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"], env=env, text=True, timeout=1).strip()
+        parts = out.split()
+        if len(parts) >= 2 and parts[0] == "Volume:":
+            vol = int(round(float(parts[1]) * 100))
+            muted = "[MUTED]" in out
+            return {"volume": min(100, max(0, vol)), "muted": muted}
+    except Exception:
+        pass
+
+    try:
+        out = subprocess.check_output(["pactl", "get-sink-volume", "@DEFAULT_SINK@"], env=env, text=True, timeout=1)
+        import re
+        m = re.search(r"(\d+)%", out)
+        if m:
+            vol = int(m.group(1))
+            mute_out = subprocess.check_output(["pactl", "get-sink-mute", "@DEFAULT_SINK@"], env=env, text=True, timeout=1)
+            muted = "yes" in mute_out.lower()
+            return {"volume": min(100, max(0, vol)), "muted": muted}
+    except Exception:
+        pass
+
+    try:
+        out = subprocess.check_output(["amixer", "sget", "Master"], env=env, text=True, timeout=1)
+        import re
+        m = re.search(r"\[(\d+)%\]", out)
+        if m:
+            vol = int(m.group(1))
+            muted = "[off]" in out
+            return {"volume": min(100, max(0, vol)), "muted": muted}
+    except Exception:
+        pass
+
+    return {"volume": 50, "muted": False}
+
+def set_laptop_volume(vol_pct=None, mute=None):
+    env = os.environ.copy()
+    if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
+    if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{os.getuid()}/bus"
+
+    if vol_pct is not None:
+        try:
+            val = max(0, min(100, int(vol_pct)))
+            frac = val / 100.0
+            done = False
+            try:
+                subprocess.run(["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{frac:.2f}"], env=env, timeout=1, check=True)
+                done = True
+            except Exception:
+                pass
+            if not done:
+                try:
+                    subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{val}%"], env=env, timeout=1, check=True)
+                    done = True
+                except Exception:
+                    pass
+            if not done:
+                try:
+                    subprocess.run(["amixer", "set", "Master", f"{val}%"], env=env, timeout=1)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    if mute is not None:
+        try:
+            m_str = str(mute).lower()
+            if m_str == "toggle":
+                try:
+                    subprocess.run(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"], env=env, timeout=1)
+                except Exception:
+                    subprocess.run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"], env=env, timeout=1)
+            else:
+                is_m = m_str in ["1", "true", "yes"]
+                try:
+                    subprocess.run(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "1" if is_m else "0"], env=env, timeout=1)
+                except Exception:
+                    subprocess.run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "1" if is_m else "0"], env=env, timeout=1)
+        except Exception:
+            pass
+
+    return get_laptop_volume()
 
 def get_installed_cachyos_apps():
     apps = []
@@ -1458,17 +1553,43 @@ class PipeWirePortalEngine:
         self.running = True
         self.pipeline = None
         self.is_active = False
+        self.is_starting = False
         self.last_frame_time = 0
         self.loop = None
         self.session_handle = None
         self.bus = None
         self.lock = threading.Lock()
-        self.thread = threading.Thread(target=self._supervise_loop, daemon=True)
-        self.thread.start()
+        self.worker_thread = None
+
+        # Clean up any stale session token files on init to prevent FPS degradation across reboots
+        token_file = Path.home() / ".config" / "kdeconnect-streamer" / "portal_token.json"
+        if token_file.exists():
+            try:
+                token_file.unlink()
+            except Exception:
+                pass
+
+    def start(self):
+        with self.lock:
+            if self.is_active or self.is_starting:
+                return
+            self.is_starting = True
+        t = threading.Thread(target=self._run_portal_session, daemon=True)
+        self.worker_thread = t
+        t.start()
 
     def stop(self):
         with self.lock:
             self.is_active = False
+            self.is_starting = False
+            if self.session_handle and self.bus:
+                try:
+                    sess_obj = self.bus.get_object("org.freedesktop.portal.Desktop", self.session_handle)
+                    sess_iface = dbus.Interface(sess_obj, "org.freedesktop.portal.Session")
+                    sess_iface.Close()
+                except Exception:
+                    pass
+                self.session_handle = None
             if self.pipeline:
                 try:
                     self.pipeline.set_state(Gst.State.NULL)
@@ -1480,16 +1601,7 @@ class PipeWirePortalEngine:
                     self.loop.quit()
                 except Exception:
                     pass
-
-    def _supervise_loop(self):
-        while self.running:
-            try:
-                self._run_portal_session()
-            except Exception as e:
-                print(f"[!] Screencast portal supervisor error: {e}")
-            with self.lock:
-                self.is_active = False
-            time.sleep(2)
+            stream_state.latest_frame = None
 
     def _run_portal_session(self):
         import dbus
@@ -1535,34 +1647,30 @@ class PipeWirePortalEngine:
         def on_session_created(response, results):
             if response != 0:
                 print(f"[!] Portal Session create rejected: {response}")
+                with self.lock:
+                    self.is_starting = False
+                    self.is_active = False
                 loop.quit()
                 return
             session_handle[0] = str(results.get("session_handle"))
             self.session_handle = session_handle[0]
-            token_file = Path.home() / ".config" / "kdeconnect-streamer" / "portal_token.json"
-            cached_token = None
-            if token_file.exists():
-                try:
-                    t_data = json.loads(token_file.read_text())
-                    if time.time() - t_data.get("timestamp", 0) < 7 * 86400:
-                        cached_token = t_data.get("restore_token")
-                except Exception:
-                    pass
 
+            # Do NOT persist restore tokens across reboots; always prompt fresh screen share dialog
             opts = {
                 "types": dbus.UInt32(1),
                 "multiple": dbus.Boolean(False),
                 "handle_token": select_token,
                 "cursor_mode": dbus.UInt32(2),
-                "persist_mode": dbus.UInt32(2)
+                "persist_mode": dbus.UInt32(0)
             }
-            if cached_token:
-                opts["restore_token"] = str(cached_token)
             screencast.SelectSources(session_handle[0], opts)
 
         def on_sources_selected(response, results):
             if response != 0:
                 print(f"[!] Portal Source select rejected: {response}")
+                with self.lock:
+                    self.is_starting = False
+                    self.is_active = False
                 loop.quit()
                 return
             screencast.Start(
@@ -1577,13 +1685,11 @@ class PipeWirePortalEngine:
         def on_started(response, results):
             if response != 0:
                 print(f"[!] Portal Screencast start rejected: {response}")
+                with self.lock:
+                    self.is_starting = False
+                    self.is_active = False
                 loop.quit()
                 return
-            restore_tok = results.get("restore_token")
-            if restore_tok:
-                token_file = Path.home() / ".config" / "kdeconnect-streamer" / "portal_token.json"
-                token_file.parent.mkdir(parents=True, exist_ok=True)
-                token_file.write_text(json.dumps({"restore_token": str(restore_tok), "timestamp": time.time()}))
             streams = results.get("streams", [])
             if streams:
                 node_id = int(streams[0][0])
@@ -1607,7 +1713,9 @@ class PipeWirePortalEngine:
                 sink = self.pipeline.get_by_name("sink")
                 sink.connect("new-sample", on_new_sample)
                 self.pipeline.set_state(Gst.State.PLAYING)
-                self.is_active = True
+                with self.lock:
+                    self.is_active = True
+                    self.is_starting = False
                 print("[+] PipeWire 60 FPS GPU Screencast Active!")
 
         m1 = bus.add_signal_receiver(
@@ -1641,6 +1749,7 @@ class PipeWirePortalEngine:
             cleanup_signals()
             with self.lock:
                 self.is_active = False
+                self.is_starting = False
                 if self.pipeline:
                     try:
                         self.pipeline.set_state(Gst.State.NULL)
@@ -1690,6 +1799,281 @@ class FastWaylandCaptureEngine:
 
 portal_engine = PipeWirePortalEngine()
 fallback_engine = FastWaylandCaptureEngine(portal_engine)
+
+class SystemLifecycleMonitor:
+    def __init__(self, portal_engine):
+        self.portal_engine = portal_engine
+        self.running = True
+        self.thread = threading.Thread(target=self._monitor_loop, daemon=True)
+        self.thread.start()
+
+    def _setup_dbus_signals(self):
+        try:
+            import dbus
+            sbus = dbus.SessionBus()
+            def on_screensaver_active(active):
+                if bool(active):
+                    print("[*] Screen locked (ScreenSaver ActiveChanged) -> terminating screencast session")
+                    self._terminate_stream()
+
+            sbus.add_signal_receiver(
+                on_screensaver_active,
+                signal_name="ActiveChanged",
+                dbus_interface="org.freedesktop.ScreenSaver"
+            )
+            sbus.add_signal_receiver(
+                on_screensaver_active,
+                signal_name="ActiveChanged",
+                dbus_interface="org.kde.ScreenSaver"
+            )
+        except Exception as e:
+            print(f"[!] DBus session signal setup note: {e}")
+
+        try:
+            import dbus
+            sysbus = dbus.SystemBus()
+            def on_sleep(is_sleeping):
+                if bool(is_sleeping):
+                    print("[*] System preparing for sleep -> terminating screencast session")
+                    self._terminate_stream()
+
+            def on_lock():
+                print("[*] System session locked -> terminating screencast session")
+                self._terminate_stream()
+
+            def on_nm_state(state):
+                if int(state) < 40:
+                    print(f"[*] Network disconnected (state={state}) -> terminating screencast session")
+                    self._terminate_stream()
+
+            sysbus.add_signal_receiver(
+                on_sleep,
+                signal_name="PrepareForSleep",
+                dbus_interface="org.freedesktop.login1.Manager"
+            )
+            sysbus.add_signal_receiver(
+                on_lock,
+                signal_name="Lock",
+                dbus_interface="org.freedesktop.login1.Session"
+            )
+            sysbus.add_signal_receiver(
+                on_nm_state,
+                signal_name="StateChanged",
+                dbus_interface="org.freedesktop.NetworkManager"
+            )
+        except Exception as e:
+            print(f"[!] DBus system signal setup note: {e}")
+
+    def _terminate_stream(self):
+        stream_state.active_clients = 0
+        self.portal_engine.stop()
+
+    def _check_screensaver_locked(self):
+        try:
+            import dbus
+            sbus = dbus.SessionBus()
+            ss = sbus.get_object("org.freedesktop.ScreenSaver", "/org/freedesktop/ScreenSaver")
+            ss_iface = dbus.Interface(ss, "org.freedesktop.ScreenSaver")
+            return bool(ss_iface.GetActive())
+        except Exception:
+            return False
+
+    def _check_network_connected(self):
+        ip = get_local_ip()
+        return ip != "127.0.0.1" and bool(ip)
+
+    def _monitor_loop(self):
+        self._setup_dbus_signals()
+        while self.running and stream_state.running:
+            time.sleep(2)
+            if self.portal_engine.is_active or self.portal_engine.is_starting or stream_state.active_clients > 0:
+                if self._check_screensaver_locked():
+                    print("[*] Screen lock detected by watchdog -> terminating screencast session")
+                    self._terminate_stream()
+                    continue
+
+                if not self._check_network_connected():
+                    print("[*] Network offline detected by watchdog -> terminating screencast session")
+                    self._terminate_stream()
+                    continue
+
+lifecycle_monitor = SystemLifecycleMonitor(portal_engine)
+
+
+def get_mpris_status(req_player=""):
+    env = os.environ.copy()
+    if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
+    if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{os.getuid()}/bus"
+
+    players = []
+    try:
+        out = subprocess.check_output(["busctl", "--user", "list"], env=env, text=True, timeout=1)
+        for line in out.splitlines():
+            parts = line.split()
+            if parts and parts[0].startswith("org.mpris.MediaPlayer2."):
+                if "kdeconnect" not in parts[0]:
+                    players.append(parts[0])
+    except Exception:
+        pass
+
+    player_map = {}
+    for full_name in players:
+        short = full_name.replace("org.mpris.MediaPlayer2.", "")
+        player_map[short] = full_name
+
+    selected_full = ""
+    selected_short = ""
+
+    if req_player:
+        for k, v in player_map.items():
+            if req_player.lower() in k.lower() or req_player.lower() in v.lower():
+                selected_short = k
+                selected_full = v
+                break
+
+    if not selected_full and player_map:
+        for k, v in player_map.items():
+            try:
+                st = subprocess.check_output(["busctl", "--user", "get-property", v, "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", "PlaybackStatus"], env=env, text=True, timeout=1).strip()
+                if "Playing" in st:
+                    selected_short = k
+                    selected_full = v
+                    break
+            except Exception:
+                pass
+
+    if not selected_full and player_map:
+        selected_short = list(player_map.keys())[0]
+        selected_full = player_map[selected_short]
+
+    res = {
+        "players": list(player_map.keys()),
+        "selected_player": selected_short,
+        "title": "",
+        "artist": "",
+        "album": "",
+        "status": "Stopped",
+        "position": 0,
+        "length": 0
+    }
+
+    if selected_full:
+        try:
+            st = subprocess.check_output(["busctl", "--user", "get-property", selected_full, "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", "PlaybackStatus"], env=env, text=True, timeout=1).strip()
+            m = re.search(r's\s+"([^"]+)"', st)
+            if m:
+                res["status"] = m.group(1)
+        except Exception:
+            pass
+
+        try:
+            pos_out = subprocess.check_output(["busctl", "--user", "get-property", selected_full, "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", "Position"], env=env, text=True, timeout=1).strip()
+            m = re.search(r'x\s+(\d+)', pos_out)
+            if m:
+                res["position"] = int(m.group(1))
+        except Exception:
+            pass
+
+        try:
+            meta_out = subprocess.check_output(["busctl", "--user", "get-property", selected_full, "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", "Metadata"], env=env, text=True, timeout=1).strip()
+            
+            m_title = re.search(r'"xesam:title"\s+s\s+"([^"]+)"', meta_out)
+            if m_title:
+                res["title"] = m_title.group(1).encode('utf-8').decode('unicode_escape', errors='ignore')
+
+            m_art = re.search(r'"xesam:artist"\s+as\s+\d+\s+"([^"]+)"', meta_out)
+            if m_art:
+                res["artist"] = m_art.group(1).encode('utf-8').decode('unicode_escape', errors='ignore')
+
+            m_alb = re.search(r'"xesam:album"\s+s\s+"([^"]+)"', meta_out)
+            if m_alb:
+                res["album"] = m_alb.group(1).encode('utf-8').decode('unicode_escape', errors='ignore')
+
+            m_len = re.search(r'"mpris:length"\s+[xt]\s+(\d+)', meta_out)
+            if m_len:
+                res["length"] = int(m_len.group(1))
+        except Exception as e:
+            pass
+
+        if not res["artist"]:
+            for v in player_map.values():
+                if "plasma-browser-integration" in v:
+                    try:
+                        meta = subprocess.check_output(["busctl", "--user", "get-property", v, "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", "Metadata"], env=env, text=True, timeout=1).strip()
+                        m_art = re.search(r'"xesam:artist"\s+as\s+\d+\s+"([^"]+)"', meta)
+                        if m_art:
+                            res["artist"] = m_art.group(1).encode('utf-8').decode('unicode_escape', errors='ignore')
+                    except Exception:
+                        pass
+
+    return res
+
+def perform_mpris_action(act, req_player="", pos=0):
+    env = os.environ.copy()
+    if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
+    if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{os.getuid()}/bus"
+
+    players = []
+    try:
+        out = subprocess.check_output(["busctl", "--user", "list"], env=env, text=True, timeout=1)
+        for line in out.splitlines():
+            parts = line.split()
+            if parts and parts[0].startswith("org.mpris.MediaPlayer2."):
+                if "kdeconnect" not in parts[0]:
+                    players.append(parts[0])
+    except Exception:
+        pass
+
+    target_service = ""
+    if req_player:
+        if req_player.startswith("org.mpris.MediaPlayer2."):
+            target_service = req_player
+        else:
+            for p in players:
+                if req_player.lower() in p.lower():
+                    target_service = p
+                    break
+
+    if not target_service and players:
+        target_service = players[0]
+
+    if not target_service:
+        return False
+
+    cmd = []
+    if act == "play_pause":
+        cmd = ["busctl", "--user", "call", target_service, "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", "PlayPause"]
+    elif act == "play":
+        cmd = ["busctl", "--user", "call", target_service, "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", "Play"]
+    elif act == "pause":
+        cmd = ["busctl", "--user", "call", target_service, "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", "Pause"]
+    elif act == "next":
+        cmd = ["busctl", "--user", "call", target_service, "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", "Next"]
+    elif act in ["previous", "prev"]:
+        cmd = ["busctl", "--user", "call", target_service, "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", "Previous"]
+    elif act == "seek":
+        try:
+            meta = subprocess.check_output(["busctl", "--user", "get-property", target_service, "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", "Metadata"], env=env, text=True, timeout=1).strip()
+            m_tid = re.search(r'"mpris:trackid"\s+[os]\s+"([^"]+)"', meta)
+            track_id = m_tid.group(1) if m_tid else "/org/mpris/MediaPlayer2/CurrentTrack"
+            microsecs = int(float(pos) * 1000000)
+            cmd = ["busctl", "--user", "call", target_service, "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", "SetPosition", "ox", track_id, str(microsecs)]
+        except Exception:
+            return False
+
+    if cmd:
+        try:
+            subprocess.run(cmd, env=env, timeout=1, check=True)
+            return True
+        except Exception:
+            if "brave" in target_service or "browser" in target_service:
+                try:
+                    alt = ["busctl", "--user", "call", "org.mpris.MediaPlayer2.plasma-browser-integration", "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", cmd[5]]
+                    subprocess.run(alt, env=env, timeout=1, check=True)
+                    return True
+                except Exception:
+                    pass
+    return False
 
 class StreamHandler(BaseHTTPRequestHandler):
     def do_HEAD(self):
@@ -1745,71 +2129,72 @@ class StreamHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
 
-        elif path in ["/terminate_session", "/stop_stream"]:
-            portal_engine.stop()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps({"success": True}).encode("utf-8"))
-            return
-
-        length = 0
-        body = ""
-        if self.headers.get('Content-Length'):
+        elif path in ["/capture_screenshot", "/screenshot.png", "/screenshot"]:
+            env = os.environ.copy()
+            if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
+            if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{os.getuid()}/bus"
+            ss_path = "/tmp/kdeconnect_screenshot.png"
             try:
-                length = int(self.headers.get('Content-Length'))
-                body = self.rfile.read(length).decode('utf-8', errors='replace')
+                if os.path.exists(ss_path):
+                    os.remove(ss_path)
             except Exception:
                 pass
+            try:
+                subprocess.run(["grim", ss_path], env=env, timeout=3, check=True)
+            except Exception:
+                try:
+                    subprocess.run(["spectacle", "-b", "-n", "-o", ss_path], env=env, timeout=3, check=True)
+                except Exception:
+                    try:
+                        subprocess.run(["import", "-window", "root", ss_path], env=env, timeout=3)
+                    except Exception:
+                        pass
+            if os.path.exists(ss_path) and os.path.getsize(ss_path) > 0:
+                with open(ss_path, "rb") as f:
+                    img_data = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(img_data)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(img_data)
+            else:
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "Failed to capture screenshot"}).encode("utf-8"))
 
-        if path in ["/terminal_exec", "/exec"]:
-            cmd = body.strip() if body.strip() else "bash"
-            success = global_pty.start(cmd)
+        elif path == "/media_status":
+            req_player = query_params.get("player", [""])[0].strip()
+            res = get_mpris_status(req_player)
+            vol_data = get_laptop_volume()
+            res["volume"] = vol_data.get("volume", 50)
+            res["muted"] = vol_data.get("muted", False)
+            resp = json.dumps(res).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp)))
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-            self.wfile.write(json.dumps({"success": success, "cmd": cmd}).encode("utf-8"))
+            self.wfile.write(resp)
 
-        elif path in ["/terminal_input", "/input"]:
-            global_pty.write_input(body)
+        elif path == "/media_action":
+            act = query_params.get("action", [""])[0].strip()
+            req_player = query_params.get("player", [""])[0].strip()
+            pos = query_params.get("position", ["0"])[0]
+            perform_mpris_action(act, req_player, pos)
+            res = get_mpris_status(req_player)
+            vol_data = get_laptop_volume()
+            res["volume"] = vol_data.get("volume", 50)
+            res["muted"] = vol_data.get("muted", False)
+            resp = json.dumps(res).encode("utf-8")
             self.send_response(200)
-            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp)))
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-            self.wfile.write(b"OK")
-
-        elif path in ["/task_manager_action", "/action"]:
-            query_params = parse_qs(parsed_url.query)
-            cmd = query_params.get("cmd", [""])[0]
-            if not cmd and body.strip():
-                cmd = body.strip()
-            res = execute_task_manager_action(cmd)
-            res_b = res.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain")
-            self.send_header("Content-Length", str(len(res_b)))
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            try:
-                self.wfile.write(res_b)
-            except Exception:
-                pass
-
-        elif path in ["/terminal_signal", "/signal"]:
-            sig = body.strip().lower()
-            if sig in ["sigint", "ctrl+c", "c"]:
-                global_pty.write_input("\x03")
-            elif sig in ["sigtstp", "ctrl+z", "z"]:
-                global_pty.write_input("\x1a")
-            elif sig in ["eof", "ctrl+d", "d"]:
-                global_pty.write_input("\x04")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(b"OK")
+            self.wfile.write(resp)
 
         elif path == "/clipboard":
             ok = set_laptop_clipboard(body)
@@ -1817,7 +2202,24 @@ class StreamHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-            self.wfile.write(json.dumps({"success": ok}).encode("utf-8"))
+            self.wfile.write(json.dumps({"success": ok, "current": body, "clipboard": body}).encode("utf-8"))
+
+        elif path in ["/volume", "/set_volume"]:
+            level = None
+            mute = None
+            try:
+                if body:
+                    data = json.loads(body)
+                    level = data.get("level") or data.get("volume")
+                    mute = data.get("mute")
+            except Exception:
+                pass
+            res = set_laptop_volume(vol_pct=level, mute=mute)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode("utf-8"))
 
         elif path in ["/mic", "/mic_stream"]:
             self.send_response(200)
@@ -1971,6 +2373,7 @@ class StreamHandler(BaseHTTPRequestHandler):
                         self.wfile.write(chunk)
 
         elif path in ["/", "/stream.mjpeg", "/stream"]:
+            portal_engine.start()
             try:
                 self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 self.request.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
@@ -2015,57 +2418,72 @@ class StreamHandler(BaseHTTPRequestHandler):
             finally:
                 stream_state.active_clients = max(0, stream_state.active_clients - 1)
 
-        elif path in ["/laptop_mic.pcm", "/laptop_mic.wav", "/mic.pcm", "/laptop_mic"]:
-            self.send_response(200)
-            self.send_header("Content-Type", "audio/l16; rate=44100; channels=2")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-            self.send_header("Connection", "close")
-            self.end_headers()
-
-            q = queue.Queue(maxsize=100)
-            laptop_mic_broadcaster.register(q)
-            silence_chunk = bytes(4096)
+        elif path in ["/capture_screenshot", "/screenshot.png", "/screenshot"]:
+            env = os.environ.copy()
+            if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
+            if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{os.getuid()}/bus"
+            ss_path = "/tmp/kdeconnect_screenshot.png"
             try:
-                while stream_state.running:
-                    try:
-                        chunk = q.get(timeout=0.05)
-                        self.wfile.write(chunk)
-                        self.wfile.flush()
-                    except queue.Empty:
-                        self.wfile.write(silence_chunk)
-                        self.wfile.flush()
-                        time.sleep(0.023)
-            except (BrokenPipeError, ConnectionResetError):
+                if os.path.exists(ss_path):
+                    os.remove(ss_path)
+            except Exception:
                 pass
-            finally:
-                laptop_mic_broadcaster.unregister(q)
-
-        elif path in ["/audio.pcm", "/audio.wav", "/audio.mp3", "/audio"]:
-            self.send_response(200)
-            self.send_header("Content-Type", "audio/l16; rate=44100; channels=2")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-            self.send_header("Connection", "close")
-            self.end_headers()
-
-            q = queue.Queue(maxsize=100)
-            speaker_broadcaster.register(q)
-            silence_chunk = bytes(4096)
             try:
-                while stream_state.running:
+                subprocess.run(["grim", ss_path], env=env, timeout=3, check=True)
+            except Exception:
+                try:
+                    subprocess.run(["spectacle", "-b", "-n", "-o", ss_path], env=env, timeout=3, check=True)
+                except Exception:
                     try:
-                        chunk = q.get(timeout=0.05)
-                        self.wfile.write(chunk)
-                        self.wfile.flush()
-                    except queue.Empty:
-                        self.wfile.write(silence_chunk)
-                        self.wfile.flush()
-                        time.sleep(0.023)
-            except (BrokenPipeError, ConnectionResetError):
-                pass
-            finally:
-                speaker_broadcaster.unregister(q)
+                        subprocess.run(["import", "-window", "root", ss_path], env=env, timeout=3)
+                    except Exception:
+                        pass
+            if os.path.exists(ss_path) and os.path.getsize(ss_path) > 0:
+                with open(ss_path, "rb") as f:
+                    img_data = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(img_data)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(img_data)
+            else:
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "Failed to capture screenshot"}).encode("utf-8"))
+
+        elif path == "/media_status":
+            req_player = query_params.get("player", [""])[0].strip()
+            res = get_mpris_status(req_player)
+            vol_data = get_laptop_volume()
+            res["volume"] = vol_data.get("volume", 50)
+            res["muted"] = vol_data.get("muted", False)
+            resp = json.dumps(res).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(resp)
+
+        elif path == "/media_action":
+            act = query_params.get("action", [""])[0].strip()
+            req_player = query_params.get("player", [""])[0].strip()
+            pos = query_params.get("position", ["0"])[0]
+            perform_mpris_action(act, req_player, pos)
+            res = get_mpris_status(req_player)
+            vol_data = get_laptop_volume()
+            res["volume"] = vol_data.get("volume", 50)
+            res["muted"] = vol_data.get("muted", False)
+            resp = json.dumps(res).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(resp)
 
         elif path == "/clipboard":
             wait_ver = None
@@ -2081,6 +2499,40 @@ class StreamHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
             data = clipboard_monitor.get(wait_version=wait_ver, timeout=timeout_sec)
+            resp = json.dumps(data).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(resp)
+
+        elif path in ["/volume", "/get_volume"]:
+            data = get_laptop_volume()
+            resp = json.dumps(data).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(resp)
+
+        elif path == "/set_volume":
+            level = None
+            if "level" in query_params:
+                try:
+                    level = int(query_params["level"][0])
+                except Exception:
+                    pass
+            elif "volume" in query_params:
+                try:
+                    level = int(query_params["volume"][0])
+                except Exception:
+                    pass
+            mute = None
+            if "mute" in query_params:
+                mute = query_params["mute"][0]
+            data = set_laptop_volume(vol_pct=level, mute=mute)
             resp = json.dumps(data).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

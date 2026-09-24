@@ -43,6 +43,7 @@ import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.Menu
 import android.view.MenuItem
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
@@ -761,29 +762,79 @@ class ScreenMirrorActivity : BaseActivity<ActivityScreenMirrorBinding>(),
         }
 
         // Mouse click listeners (Portrait)
-        binding.mouseClickLeft.setOnClickListener {
-            mousePlugin?.sendLeftClick() ?: plugin?.sendLeftClick()
+        binding.mouseClickLeft.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    v.isPressed = true
+                    mousePlugin?.sendSingleHold() ?: plugin?.sendSingleHold()
+                    v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.isPressed = false
+                    mousePlugin?.sendSingleRelease() ?: plugin?.sendSingleRelease()
+                    true
+                }
+                else -> false
+            }
         }
 
         binding.mouseClickMiddle.setOnClickListener {
             mousePlugin?.sendMiddleClick() ?: plugin?.sendMiddleClick()
         }
 
-        binding.mouseClickRight.setOnClickListener {
-            mousePlugin?.sendRightClick() ?: plugin?.sendRightClick()
+        binding.mouseClickRight.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    v.isPressed = true
+                    mousePlugin?.sendRightClick() ?: plugin?.sendRightClick()
+                    v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.isPressed = false
+                    true
+                }
+                else -> false
+            }
         }
 
         // Mouse click listeners (Landscape Sidebar)
-        binding.mouseClickLeftLand.setOnClickListener {
-            mousePlugin?.sendLeftClick() ?: plugin?.sendLeftClick()
+        binding.mouseClickLeftLand.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    v.isPressed = true
+                    mousePlugin?.sendSingleHold() ?: plugin?.sendSingleHold()
+                    v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.isPressed = false
+                    mousePlugin?.sendSingleRelease() ?: plugin?.sendSingleRelease()
+                    true
+                }
+                else -> false
+            }
         }
 
         binding.mouseClickMiddleLand.setOnClickListener {
             mousePlugin?.sendMiddleClick() ?: plugin?.sendMiddleClick()
         }
 
-        binding.mouseClickRightLand.setOnClickListener {
-            mousePlugin?.sendRightClick() ?: plugin?.sendRightClick()
+        binding.mouseClickRightLand.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    v.isPressed = true
+                    mousePlugin?.sendRightClick() ?: plugin?.sendRightClick()
+                    v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.isPressed = false
+                    true
+                }
+                else -> false
+            }
         }
 
         binding.btnSendKeystrokes.visibility = View.GONE

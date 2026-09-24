@@ -78,30 +78,26 @@ class ScreenMirrorClipboardDialog : BottomSheetDialogFragment(), ClipboardListen
             while (isWatcherActive && !Thread.currentThread().isInterrupted) {
                 try {
                     val device = KdeConnect.getInstance().getDevice(deviceId)
-                    val host = device?.getRemoteIpAddress()
-                    if (!host.isNullOrEmpty()) {
-                        val url = URL("http://:59001/clipboard?version=&timeout=3")
-                        val conn = (url.openConnection() as HttpURLConnection).apply {
-                            connectTimeout = 3000
-                            readTimeout = 4500
-                            requestMethod = "GET"
-                        }
-                        if (conn.responseCode == 200) {
-                            val resp = BufferedReader(InputStreamReader(conn.inputStream)).readText()
-                            val json = JSONObject(resp)
-                            val ver = json.optInt("version", lastKnownVersion)
-                            val curr = json.optString("current", "").trim()
-                            lastKnownVersion = ver
-                            if (ClipboardListener.isValidClipboardText(curr)) {
-                                activity?.runOnUiThread {
-                                    if (_binding != null) {
-                                        binding.textRemoteClipboard.text = curr
-                                    }
+                    val host = device?.getRemoteIpAddress().takeIf { !it.isNullOrEmpty() } ?: "127.0.0.1"
+                    val url = URL("http://$host:59001/clipboard?version=$lastKnownVersion&timeout=3")
+                    val conn = (url.openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 3000
+                        readTimeout = 4500
+                        requestMethod = "GET"
+                    }
+                    if (conn.responseCode == 200) {
+                        val resp = BufferedReader(InputStreamReader(conn.inputStream)).readText()
+                        val json = JSONObject(resp)
+                        val ver = json.optInt("version", lastKnownVersion)
+                        val curr = json.optString("current", "").ifEmpty { json.optString("clipboard", "") }.trim()
+                        lastKnownVersion = ver
+                        if (ClipboardListener.isValidClipboardText(curr)) {
+                            activity?.runOnUiThread {
+                                if (_binding != null) {
+                                    binding.textRemoteClipboard.text = curr
                                 }
                             }
                         }
-                    } else {
-                        Thread.sleep(1500)
                     }
                 } catch (_: Exception) {
                     try { Thread.sleep(1000) } catch (_: Exception) { break }
@@ -169,21 +165,19 @@ class ScreenMirrorClipboardDialog : BottomSheetDialogFragment(), ClipboardListen
 
     private fun sendDirectHttpClipboard(text: String) {
         val device = KdeConnect.getInstance().getDevice(deviceId)
-        val host = device?.getRemoteIpAddress()
-        if (!host.isNullOrEmpty()) {
-            ThreadHelper.execute {
-                try {
-                    val url = URL("http://:59001/clipboard")
-                    val conn = (url.openConnection() as HttpURLConnection).apply {
-                        connectTimeout = 1500
-                        readTimeout = 1500
-                        requestMethod = "POST"
-                        doOutput = true
-                    }
-                    OutputStreamWriter(conn.outputStream).use { it.write(text) }
-                    conn.responseCode
-                } catch (_: Exception) {}
-            }
+        val host = device?.getRemoteIpAddress().takeIf { !it.isNullOrEmpty() } ?: "127.0.0.1"
+        ThreadHelper.execute {
+            try {
+                val url = URL("http://$host:59001/clipboard")
+                val conn = (url.openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 1500
+                    readTimeout = 1500
+                    requestMethod = "POST"
+                    doOutput = true
+                }
+                OutputStreamWriter(conn.outputStream).use { it.write(text) }
+                conn.responseCode
+            } catch (_: Exception) {}
         }
     }
 
@@ -194,30 +188,28 @@ class ScreenMirrorClipboardDialog : BottomSheetDialogFragment(), ClipboardListen
         }
 
         val device = KdeConnect.getInstance().getDevice(deviceId)
-        val host = device?.getRemoteIpAddress()
-        if (!host.isNullOrEmpty()) {
-            ThreadHelper.execute {
-                try {
-                    val url = URL("http://:59001/clipboard")
-                    val conn = (url.openConnection() as HttpURLConnection).apply {
-                        connectTimeout = 1500
-                        readTimeout = 2000
-                        requestMethod = "GET"
-                    }
-                    if (conn.responseCode == 200) {
-                        val resp = BufferedReader(InputStreamReader(conn.inputStream)).readText()
-                        val json = JSONObject(resp)
-                        val curr = json.optString("current", "").trim()
-                        val ver = json.optInt("version", lastKnownVersion)
-                        lastKnownVersion = ver
-                        if (ClipboardListener.isValidClipboardText(curr)) {
-                            activity?.runOnUiThread {
-                                _binding?.textRemoteClipboard?.text = curr
-                            }
+        val host = device?.getRemoteIpAddress().takeIf { !it.isNullOrEmpty() } ?: "127.0.0.1"
+        ThreadHelper.execute {
+            try {
+                val url = URL("http://$host:59001/clipboard")
+                val conn = (url.openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 1500
+                    readTimeout = 2000
+                    requestMethod = "GET"
+                }
+                if (conn.responseCode == 200) {
+                    val resp = BufferedReader(InputStreamReader(conn.inputStream)).readText()
+                    val json = JSONObject(resp)
+                    val curr = json.optString("current", "").ifEmpty { json.optString("clipboard", "") }.trim()
+                    val ver = json.optInt("version", lastKnownVersion)
+                    lastKnownVersion = ver
+                    if (ClipboardListener.isValidClipboardText(curr)) {
+                        activity?.runOnUiThread {
+                            _binding?.textRemoteClipboard?.text = curr
                         }
                     }
-                } catch (_: Exception) {}
-            }
+                }
+            } catch (_: Exception) {}
         }
     }
 

@@ -158,9 +158,38 @@ public class MousePadActivity
         setSupportActionBar(getBinding().toolbarLayout.toolbar);
         Objects.requireNonNull(getSupportActionBar()).setDisplayHomeAsUpEnabled(true);
         getSupportActionBar().setDisplayShowHomeEnabled(true);
-        getBinding().mouseClickLeft.setOnClickListener(v -> sendLeftClick());
+        getBinding().mouseClickLeft.setOnTouchListener((v, event) -> {
+            switch (event.getAction()) {
+                case android.view.MotionEvent.ACTION_DOWN:
+                    v.setPressed(true);
+                    sendLeftHold();
+                    v.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP);
+                    return true;
+                case android.view.MotionEvent.ACTION_UP:
+                case android.view.MotionEvent.ACTION_CANCEL:
+                    v.setPressed(false);
+                    sendLeftRelease();
+                    return true;
+            }
+            return false;
+        });
+
         getBinding().mouseClickMiddle.setOnClickListener(v -> sendMiddleClick());
-        getBinding().mouseClickRight.setOnClickListener(v -> sendRightClick());
+
+        getBinding().mouseClickRight.setOnTouchListener((v, event) -> {
+            switch (event.getAction()) {
+                case android.view.MotionEvent.ACTION_DOWN:
+                    v.setPressed(true);
+                    sendRightClick();
+                    v.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP);
+                    return true;
+                case android.view.MotionEvent.ACTION_UP:
+                case android.view.MotionEvent.ACTION_CANCEL:
+                    v.setPressed(false);
+                    return true;
+            }
+            return false;
+        });
 
         deviceId = getIntent().getStringExtra("deviceId");
 
@@ -530,6 +559,20 @@ public class MousePadActivity
         keyboardShown = imeInsets.bottom != 0 || imeInsets.top != 0
             || imeInsets.left != 0 || imeInsets.right != 0;
         return ViewCompat.onApplyWindowInsets(v, insets);
+    }
+
+    private void sendLeftHold() {
+        MousePadPlugin plugin = KdeConnect.getInstance().getDevicePlugin(deviceId, MousePadPlugin.class);
+        if (plugin != null) {
+            plugin.sendSingleHold();
+        }
+    }
+
+    private void sendLeftRelease() {
+        MousePadPlugin plugin = KdeConnect.getInstance().getDevicePlugin(deviceId, MousePadPlugin.class);
+        if (plugin != null) {
+            plugin.sendSingleRelease();
+        }
     }
 
     private void sendLeftClick() {

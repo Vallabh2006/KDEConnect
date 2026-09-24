@@ -128,9 +128,9 @@ class ClipboardManagerActivity : AppCompatActivity() {
         }
 
         val device = KdeConnect.getInstance().getDevice(deviceId)
-        val host = device?.getRemoteIpAddress()
+        val host = device?.getRemoteIpAddress().takeIf { !it.isNullOrEmpty() } ?: "127.0.0.1"
 
-        if (!host.isNullOrEmpty()) {
+        if (host.isNotEmpty()) {
             ThreadHelper.execute {
                 try {
                     val url = URL("http://$host:59001/clipboard")
@@ -142,7 +142,7 @@ class ClipboardManagerActivity : AppCompatActivity() {
                     if (conn.responseCode == 200) {
                         val resp = BufferedReader(InputStreamReader(conn.inputStream)).readText()
                         val json = JSONObject(resp)
-                        val curr = json.optString("current", "").trim()
+                        val curr = json.optString("current", "").ifEmpty { json.optString("clipboard", "") }.trim()
                         val histArray = json.optJSONArray("history")
                         val list = mutableListOf<String>()
                         if (ClipboardListener.isValidClipboardText(curr)) {
@@ -206,8 +206,8 @@ class ClipboardManagerActivity : AppCompatActivity() {
         ClipboardListener.instance(this).setText(safeText)
 
         // Also post directly to daemon for instant Wayland / CachyOS wl-copy
-        val host = device?.getRemoteIpAddress()
-        if (!host.isNullOrEmpty()) {
+        val host = device?.getRemoteIpAddress().takeIf { !it.isNullOrEmpty() } ?: "127.0.0.1"
+        if (host.isNotEmpty()) {
             ThreadHelper.execute {
                 try {
                     val url = URL("http://$host:59001/clipboard")

@@ -740,6 +740,24 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
     <string name="pref_plugin_taskmanager_desc">Monitor CPU, RAM, Network, Services, Processes and App Usage</string>
 
     <!-- Floating Action Button & Shortcuts -->
+    <string name="floating_action_media_control">Media Control</string>
+    <string name="floating_action_volume">Media Control</string>
+    <string name="pc_volume_title">PC Volume</string>
+    <string name="floating_action_phone_mic">Phone Mic</string>
+    <string name="floating_action_remote_pointer">Remote Pointer</string>
+    <string name="floating_action_send_clip">Send Clip</string>
+    <string name="floating_action_receive_clip">Receive Clip</string>
+    <string name="floating_action_take_send_ss">Take + Send SS</string>
+    <string name="floating_action_lock_pc">Lock PC</string>
+    <string name="floating_action_screenmirror">Screen Mirror</string>
+    <string name="floating_action_mousepad">Mousepad</string>
+    <string name="floating_action_taskmanager">Task Manager</string>
+    <string name="floating_action_terminal">Terminal</string>
+    <string name="remote_pointer_title">Remote Pointer</string>
+    <string name="mouse_left_btn">Left</string>
+    <string name="mouse_right_btn">Right</string>
+    <string name="phone_mic_started">Phone Mic streaming to PC</string>
+    <string name="phone_mic_stopped">Phone Mic disconnected</string>
     <string name="floating_action_button">Floating Action Button</string>
     <string name="floating_action_button_desc">Quick floating button on screen to control your PC</string>
     <string name="floating_tile_label">Floating Controls</string>

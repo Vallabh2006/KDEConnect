@@ -19,11 +19,17 @@ The Android client features a clean, curated 2-column action grid organized logi
 
 ## Key Highlights
 
-### 1. Floating Action Button & Shortcuts
-- **Customizable Overlay**: Fast floating bubble accessible from anywhere on the phone to trigger remote mousepad, clipboard sync, media controls, presentation, screen mirror, or custom commands.
-- **Drag-to-Close Dismissal**: Drag down to a highlighted bottom dismissal target to easily dismiss the floating button with haptic feedback.
-- **Quick Settings & Drawer Tile**: Toggle on/off seamlessly via the Android Quick Settings tile or the app navigation drawer.
-- **Permission Management**: Guided setup for "Display over other apps" overlay permission.
+### 1. Floating Action Button & Productivity Shortcuts
+- **Idle State, Edge Tucking & Landscape Snapping**: Automatically dims to translucent opacity and smoothly tucks halfway into the screen edge when inactive for 3.5s; responds to orientation changes and automatically stays docked at the far edge in landscape mode.
+- **Mobi-Style Linear Vertical Emergence**: Tapping the bubble reveals clean, circular Material3 action cards arranged in a vertical stack with staggered spring animations.
+- **Over-the-Display Media & Volume Control Overlay**: Floating draggable media card featuring track seek position slider (0–duration), like/dislike buttons, previous, play/pause, next, loop repeat mode toggle, real-time PC master volume seekbar (0–100%), mute toggle, and quick volume presets (-10, 30%, 60%, 100%, +10).
+- **Over-the-Display Remote Pointer & Simultaneous Drag**: Floating touchpad overlay with multi-touch support, tap-to-click, and continuous hold-and-drag mouse buttons (left/right click held down while moving cursor simultaneously).
+- **Phone-to-PC Microphone Streaming**: Stream phone mic audio in real-time straight to your computer's virtual microphone (`Phone_Microphone`) over high-speed TCP/HTTP.
+- **PC Screenshot to Phone Gallery**: One-tap screenshot capture on PC that automatically streams the PNG image to your phone and saves it straight to your gallery (`Pictures/KDEConnect`).
+- **Continuous Background Clipboard Sync**: Active background clipboard polling that automatically captures text copied on the phone and propagates it to the PC clipboard and history without manual intervention.
+- **Daily One-Tap Quick Actions**: Media & volume control, microphone streaming, remote pointer, clipboard sync, screenshot-to-gallery, screen lock, screen mirroring, task manager, and terminal.
+- **Persistent Background Daemon**: Configured with `stopWithTask="false"` and sticky foreground service so clearing recents never kills the floating button.
+- **PC Quick Restart (`Win + C`)**: Instantaneous desktop service restart, PipeWire stream reset, and automatic ADB port forwarding via `/home/vallabh/Scripts/kdeconnect.sh`.
 
 ### 2. Multimedia Default Output Volume Control
 - Volume slider and hardware volume keys in the Multimedia screen automatically adjust the **currently active computer audio output sink** (Master / Speakers / Headphones) by default, with seamless fallback to player volume.

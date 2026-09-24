@@ -26,6 +26,7 @@ import org.kde.kdeconnect.backends.BaseLinkProvider
 import org.kde.kdeconnect.Device
 import org.kde.kdeconnect.DeviceInfo
 import org.kde.kdeconnect.DeviceInfo.Companion.fromIdentityPacketAndCert
+import org.kde.kdeconnect.helpers.ConnectionStateHelper
 import org.kde.kdeconnect.helpers.DeviceHelper
 import org.kde.kdeconnect.helpers.security.SslHelper
 import org.kde.kdeconnect.helpers.ThreadHelper.execute
@@ -49,6 +50,10 @@ class BluetoothLinkProvider(private val context: Context) : BaseLinkProvider() {
 
     @Throws(CertificateException::class)
     private fun addLink(identityPacket: NetworkPacket, link: BluetoothLink) {
+        if (!ConnectionStateHelper.isConnectionEnabled(context)) {
+            Log.i("BluetoothLinkProvider", "KDE Connect is disabled via QS tile, ignoring Bluetooth link")
+            return
+        }
         val deviceId = identityPacket.getString("deviceId")
         Log.i("BluetoothLinkProvider", "addLink to $deviceId")
         val oldLink = visibleDevices[deviceId]

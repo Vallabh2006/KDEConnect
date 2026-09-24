@@ -6,15 +6,12 @@
 
 package org.kde.kdeconnect.plugins.floating
 
-import android.app.PendingIntent
-import android.content.Intent
 import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
+import android.widget.Toast
 import androidx.annotation.RequiresApi
-import androidx.core.service.quicksettings.PendingIntentActivityWrapper
-import androidx.core.service.quicksettings.TileServiceCompat
-import org.kde.kdeconnect.ui.MainActivity
+import org.kde.kdeconnect.helpers.ConnectionStateHelper
 
 @RequiresApi(Build.VERSION_CODES.N)
 class FloatingTileService : TileService() {
@@ -27,28 +24,25 @@ class FloatingTileService : TileService() {
     override fun onClick() {
         super.onClick()
 
-        if (!FloatingButtonHelper.hasOverlayPermission(this)) {
-            val intent = Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-            TileServiceCompat.startActivityAndCollapse(
-                this,
-                PendingIntentActivityWrapper(
-                    this, 0, intent,
-                    PendingIntent.FLAG_ONE_SHOT, true
-                )
-            )
-            return
-        }
-
-        FloatingButtonHelper.toggleFloatingButton(this)
+        val isEnabled = ConnectionStateHelper.toggleConnection(this)
         updateTileState()
+
+        val msg = if (isEnabled) {
+            "KDE Connect connected (Online)"
+        } else {
+            "KDE Connect disconnected (Offline)"
+        }
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
 
     private fun updateTileState() {
         val tile = qsTile ?: return
-        val isRunning = FloatingButtonHelper.isServiceRunning()
-        tile.state = if (isRunning) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+        val isEnabled = ConnectionStateHelper.isConnectionEnabled(this)
+        tile.state = if (isEnabled) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+        tile.label = if (isEnabled) "KDE Connect" else "KDE Connect (Off)"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            tile.subtitle = if (isEnabled) "Connected" else "Disconnected"
+        }
         tile.updateTile()
     }
 }

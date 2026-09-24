@@ -524,20 +524,39 @@ class PresenterActivity : AppCompatActivity(), SensorEventListener {
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        FilledTonalButton(
-                            onClick = { mousePlugin?.sendLeftClick() },
-                            modifier = Modifier.weight(1f).height(48.dp),
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .pointerInput(Unit) {
+                                    awaitPointerEventScope {
+                                        while (true) {
+                                            val event = awaitPointerEvent()
+                                            if (event.changes.any { it.pressed }) {
+                                                mousePlugin?.sendSingleHold()
+                                                while (true) {
+                                                    val nextEvent = awaitPointerEvent()
+                                                    if (!nextEvent.changes.any { it.pressed }) {
+                                                        mousePlugin?.sendSingleRelease()
+                                                        break
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
                             shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shadowElevation = 2.dp
                         ) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_arrow_back_black_24dp),
-                                contentDescription = "Left Click",
-                                modifier = Modifier.size(20.dp)
-                            )
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_arrow_back_black_24dp),
+                                    contentDescription = "Left Click",
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
 
                         FilledTonalButton(
@@ -556,20 +575,29 @@ class PresenterActivity : AppCompatActivity(), SensorEventListener {
                             )
                         }
 
-                        FilledTonalButton(
-                            onClick = { mousePlugin?.sendRightClick() },
-                            modifier = Modifier.weight(1f).height(48.dp),
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onPress = {
+                                            mousePlugin?.sendRightClick()
+                                        }
+                                    )
+                                },
                             shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shadowElevation = 2.dp
                         ) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_arrow_forward_black_24dp),
-                                contentDescription = "Right Click",
-                                modifier = Modifier.size(20.dp)
-                            )
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_arrow_forward_black_24dp),
+                                    contentDescription = "Right Click",
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
 

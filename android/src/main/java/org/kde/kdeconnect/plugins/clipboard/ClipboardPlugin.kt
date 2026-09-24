@@ -94,8 +94,8 @@ class ClipboardPlugin : Plugin() {
         device.sendPacket(np)
         KdeLog.clipboard("Propagated Clipboard", content)
 
-        val host = device.getRemoteIpAddress()
-        if (!host.isNullOrEmpty()) {
+        val host = device.getRemoteIpAddress().takeIf { !it.isNullOrEmpty() } ?: "127.0.0.1"
+        if (host.isNotEmpty()) {
             org.kde.kdeconnect.helpers.ThreadHelper.execute {
                 try {
                     val url = java.net.URL("http://$host:59001/clipboard")

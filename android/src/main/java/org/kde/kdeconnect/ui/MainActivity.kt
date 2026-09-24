@@ -240,6 +240,17 @@ class MainActivity : AppCompatActivity(), OnSharedPreferenceChangeListener {
         if (missingPermissions.isNotEmpty()) {
             ActivityCompat.requestPermissions(this, missingPermissions.toTypedArray(), RESULT_NOTIFICATIONS_ENABLED)
         }
+
+        if (savedInstanceState == null) {
+            root.alpha = 0f
+            root.translationY = 20f * resources.displayMetrics.density
+            root.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(320)
+                .setInterpolator(android.view.animation.DecelerateInterpolator())
+                .start()
+        }
     }
 
     override fun onDestroy() {

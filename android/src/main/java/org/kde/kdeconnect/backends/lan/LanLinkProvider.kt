@@ -24,6 +24,7 @@ import org.kde.kdeconnect.backends.BaseLink
 import org.kde.kdeconnect.backends.BaseLinkProvider
 import org.kde.kdeconnect.backends.lan.LanLink.ConnectionStarted
 import org.kde.kdeconnect.extensions.closeSafe
+import org.kde.kdeconnect.helpers.ConnectionStateHelper
 import org.kde.kdeconnect.helpers.DeviceHelper
 import org.kde.kdeconnect.helpers.ThreadHelper
 import org.kde.kdeconnect.helpers.TrustedDevices
@@ -94,6 +95,11 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
             return null
         }
 
+        if (!ConnectionStateHelper.isConnectionEnabled(context)) {
+            Log.i("KDE/LanLinkProvider", "Ignoring identity packet because KDE Connect connection is disabled via QS tile.")
+            return null
+        }
+
         val deviceId = identityPacket.getString("deviceId")
         val myId = DeviceHelper.getDeviceId(context)
         if (deviceId == myId) {
@@ -119,6 +125,11 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
     @WorkerThread
     @Throws(IOException::class, CertificateException::class)
     private fun tcpPacketReceived(socket: Socket) {
+        if (!ConnectionStateHelper.isConnectionEnabled(context)) {
+            socket.closeSafe()
+            return
+        }
+
         val address = socket.getInetAddress()
 
         if (!isPrivateAddress(address)) {
@@ -198,6 +209,10 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
     //I've received their broadcast and should connect to their TCP socket and send my identity.
     @WorkerThread
     private fun udpPacketReceived(packet: DatagramPacket) {
+        if (!ConnectionStateHelper.isConnectionEnabled(context)) {
+            return
+        }
+
         val address = packet.address
 
         if (!isPrivateAddress(address)) {
@@ -477,6 +492,10 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
     }
 
     private fun broadcastUdpIdentityPacket(network: Network?) {
+        if (!ConnectionStateHelper.isConnectionEnabled(context)) {
+            Log.i("LanLinkProvider", "Will not UDP broadcast, KDE Connect is disabled via QS tile")
+            return
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.CINNAMON_BUN &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED) {
             Log.w("LanLinkProvider", "Will not UDP broadcast, missing ACCESS_LOCAL_NETWORK permission")
@@ -575,7 +594,7 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
     }
 
     override fun onNetworkChange(network: Network?) {
-        if (isStopped) return
+        if (isStopped || !ConnectionStateHelper.isConnectionEnabled(context)) return
         if (System.currentTimeMillis() < lastBroadcast + DELAY_BETWEEN_BROADCASTS) {
             Log.i("LanLinkProvider", "onNetworkChange: relax cowboy")
             return

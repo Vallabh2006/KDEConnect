@@ -1,3 +1,5 @@
+.gitignore
+
 /build*/
 clang
 *.kdev4
@@ -18,7 +20,15 @@ KDEConnect.includes
 .vscode
 .github/workflows/*
 
-# Eclipse settings
+.agent
+.agents
+.gemini
+.gsd
+adapters
+docs
+
+.gitlab
+.gitignore
 .cproject
 .project
 .settings/*
@@ -34,3 +44,33 @@ CMakeLists.txt.user
 /cmake-build*
 app/resources.generated.qrc
 smsapp/resources.generated.qrc
+
+GSD-STYLE.md
+model_capabilities.yaml
+PROJECT_RULES.md
+
+CONTRIBUTING.md
+AGENTS.md
+antigravity-account-switcher
+agm
+ralph-loop-for-antigravity
+# Android build & caches
+android/build/
+android/.gradle/
+android/local.properties
+android/captures/
+*.apk
+!apk/*.apk
+!installer/tools/*.apk
+*.ap_
+*.dex
+*.class
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE & OS
+.idea/
+.gradle/

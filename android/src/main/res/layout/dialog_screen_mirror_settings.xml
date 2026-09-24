@@ -1,0 +1,313 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SPDX-FileCopyrightText: 2026 Antigravity
+  SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="?attr/colorSurface"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- Header -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginBottom="16dp">
+
+            <ImageView
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:src="@drawable/ic_settings_24dp"
+                app:tint="?attr/colorPrimary" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:text="Stream &amp; Recording Settings"
+                android:textAppearance="?attr/textAppearanceTitleMedium"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- ======================================================== -->
+        <!-- CATEGORY 1: Display & Resolution -->
+        <!-- ======================================================== -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="DISPLAY &amp; RESOLUTION"
+            android:textAppearance="?attr/textAppearanceLabelLarge"
+            android:textColor="?attr/colorPrimary"
+            android:textStyle="bold"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Scaling Mode (Fit, Stretch, Original) -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Screen Scaling / Resolution:"
+            android:textAppearance="?attr/textAppearanceBodyMedium"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <Spinner
+            android:id="@+id/spinner_settings_scaling"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_translucent_chip"
+            android:layout_marginBottom="12dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+
+        <!-- Aspect Ratio -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Aspect Ratio:"
+            android:textAppearance="?attr/textAppearanceBodyMedium"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <Spinner
+            android:id="@+id/spinner_settings_aspect_ratio"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_translucent_chip"
+            android:layout_marginBottom="12dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+
+        <!-- Resolution Quality -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Resolution Quality:"
+            android:textAppearance="?attr/textAppearanceBodyMedium"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <Spinner
+            android:id="@+id/spinner_settings_resolution"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_translucent_chip"
+            android:layout_marginBottom="12dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+
+        <!-- Combined Stream Info Details Checkbox -->
+        <com.google.android.material.checkbox.MaterialCheckBox
+            android:id="@+id/check_display_details"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Display Stream Info (Live FPS, Resolution &amp; Bitrate HUD)"
+            android:textSize="14sp"
+            android:layout_marginBottom="12dp" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="?attr/colorOutlineVariant"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="14dp" />
+
+        <!-- ======================================================== -->
+        <!-- CATEGORY 2: Recording & Audio -->
+        <!-- ======================================================== -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="RECORDING &amp; AUDIO"
+            android:textAppearance="?attr/textAppearanceLabelLarge"
+            android:textColor="?attr/colorPrimary"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <!-- 1. Laptop Internal Audio -->
+        <com.google.android.material.checkbox.MaterialCheckBox
+            android:id="@+id/check_audio_laptop_internal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Laptop Internal Audio (Desktop Sound / Music / Games)"
+            android:textSize="14sp"
+            android:layout_marginBottom="6dp" />
+
+        <!-- 2. Laptop Microphone -->
+        <com.google.android.material.checkbox.MaterialCheckBox
+            android:id="@+id/check_audio_laptop_mic"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Laptop Microphone (Laptop Mic -> Phone &amp; Recording)"
+            android:textSize="14sp"
+            android:layout_marginBottom="6dp" />
+
+        <!-- 3. Phone Microphone -->
+        <com.google.android.material.checkbox.MaterialCheckBox
+            android:id="@+id/check_audio_phone_mic"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Phone Microphone (Record Phone Mic / Voice into video)"
+            android:textSize="14sp"
+            android:layout_marginBottom="10dp" />
+
+
+
+        <!-- Recording Target FPS -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Video Recording FPS:"
+            android:textAppearance="?attr/textAppearanceBodyMedium"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <Spinner
+            android:id="@+id/spinner_settings_rec_fps"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_translucent_chip"
+            android:layout_marginBottom="12dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+
+        <!-- Audio / Video Sync Calibration -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Audio / Video Sync Calibration:"
+            android:textAppearance="?attr/textAppearanceBodyMedium"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <Spinner
+            android:id="@+id/spinner_settings_audio_sync"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_translucent_chip"
+            android:layout_marginBottom="12dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+
+        <!-- Storage Location -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Recording Storage Location:"
+            android:textAppearance="?attr/textAppearanceBodyMedium"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_translucent_chip"
+            android:padding="8dp"
+            android:layout_marginBottom="12dp">
+
+            <TextView
+                android:id="@+id/text_storage_location"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Movies / KDEConnect"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="?attr/colorOnSurface"
+                android:layout_marginBottom="8dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="end">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_reset_storage"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="38dp"
+                    android:text="Reset to Movies"
+                    android:textSize="11sp"
+                    android:layout_marginEnd="8dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_change_storage"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="38dp"
+                    android:text="Choose Folder"
+                    android:textSize="11sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="?attr/colorOutlineVariant"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="14dp" />
+
+        <!-- ======================================================== -->
+        <!-- CATEGORY 3: Controls & Input -->
+        <!-- ======================================================== -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="CONTROLS &amp; INPUT"
+            android:textAppearance="?attr/textAppearanceLabelLarge"
+            android:textColor="?attr/colorPrimary"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+
+
+        <!-- Disable Input Checkbox -->
+        <com.google.android.material.checkbox.MaterialCheckBox
+            android:id="@+id/check_disable_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Disable Input (View-Only Mode: grays mouse &amp; keyboard buttons, ignores screen touches)"
+            android:textSize="14sp"
+            android:layout_marginBottom="16dp" />
+
+        <!-- ======================================================== -->
+        <!-- Reset & Close Actions -->
+        <!-- ======================================================== -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="end"
+            android:layout_marginTop="8dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_settings_reset"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Reset to Defaults"
+                android:textColor="#FF5252"
+                android:textSize="13sp"
+                android:layout_marginEnd="8dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_settings_save"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Done"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>

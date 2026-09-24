@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SPDX-FileCopyrightText: 2026 Antigravity
+  SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
+-->
+<com.google.android.material.card.MaterialCardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="4dp"
+    app:cardBackgroundColor="#1A1A1A"
+    app:cardCornerRadius="8dp"
+    app:strokeWidth="1dp"
+    app:strokeColor="#262626">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingEnd="4dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp">
+
+        <!-- Process Info (PID + Name + User) -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/text_proc_name"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="process_name"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/text_proc_meta"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="PID: 1234 • user: process"
+                android:textColor="#777777"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <!-- CPU % -->
+        <TextView
+            android:id="@+id/text_proc_cpu"
+            android:layout_width="60dp"
+            android:layout_height="wrap_content"
+            android:gravity="end"
+            android:fontFamily="monospace"
+            android:text="12.5%"
+            android:textColor="#00E676"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <!-- RAM MB -->
+        <TextView
+            android:id="@+id/text_proc_ram"
+            android:layout_width="65dp"
+            android:layout_height="wrap_content"
+            android:gravity="end"
+            android:fontFamily="monospace"
+            android:text="245 MB"
+            android:textColor="#29B6F6"
+            android:textSize="12sp" />
+
+        <!-- Actions Popup Button -->
+        <ImageButton
+            android:id="@+id/btn_proc_actions"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_settings_white_32dp"
+            app:tint="#888888"
+            android:scaleType="centerInside"
+            android:contentDescription="Process Actions" />
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

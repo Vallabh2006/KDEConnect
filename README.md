@@ -1,80 +1,73 @@
-# KDE Connect - desktop app
+# KDE Connect Enhanced Suite
 
-KDE Connect is a multi-platform app that allows your devices to communicate (eg: your phone and your computer).
+A polished, high-performance edition of **KDE Connect** featuring native Android client enhancements, streamlined menu navigation, real-time desktop streaming, remote administration tools, and an automated Linux installer.
 
-## (Some) Features
-- **Shared clipboard**: copy and paste between your phone and your computer (or any other device).
-- **Notification sync**: Read and reply to your Android notifications from the desktop.
-- **Share files and URLs** instantly from one device to another including some filesystem integration.
-- **Multimedia remote control**: Use your phone as a remote for Linux media players.
-- **Virtual touchpad**: Use your phone screen as your computer's touchpad and keyboard.
-- **Presentation remote**: Advance your presentation slides straight from your phone.
-- **Run Commands**: Run shell commands on your computer from your phone.
-- **Access SMS**: Read, send and reply to SMS and MMS from your computer.
+---
 
-All this is done completely wirelessly, utilising TLS encryption.
+## Main Menu Layout & Features
 
-## Userbase wiki
-A user-focused wiki can be found on [KDE Userbase](https://userbase.kde.org/KDEConnect)
+The Android client features a clean, curated 2-column action grid organized logically for everyday productivity:
 
-## Supported platforms
-- Computers running Linux with Plasma, GNOME, elementary OS… any distro with Qt 6 support :)
-- Android, by installing the KDE Connect app from the [Play Store](https://play.google.com/store/apps/details?id=org.kde.kdeconnect_tp) or [F-Droid](https://f-droid.org/repository/browse/?fdid=org.kde.kdeconnect_tp).
-- iPhone and iPad, by installing from the [App Store](https://apps.apple.com/us/app/kde-connect/id1580245991)
-- Computers running Windows, by installing from the [Microsoft Store](https://apps.microsoft.com/store/detail/kde-connect/9N93MRMSXBF0)
+| Column 1 | Column 2 |
+| :--- | :--- |
+| **Files**<br>Remote file browser & wireless transfer | **Clipboard**<br>Two-way sync, history & custom clip composer |
+| **Stream**<br>Zero-copy screen mirroring & bidirectional audio | **Presentation**<br>Slide control & precision gyroscope laser pointer |
+| **Task Manager**<br>Live CPU/GPU/RAM metrics & process inspector | **Live Terminal**<br>Interactive PTY shell & remote execution |
+| **Logs**<br>Live network packet inspector & diagnostics | **Multimedia**<br>Remote media playback & default audio output volume |
 
-## How to install
-These instructions explain how to install KDE Connect on your computer. You will also need to install it on your Android device and pair them together in the app before using this application. The Android app repository can be found [here](https://invent.kde.org/network/kdeconnect-android)
+---
 
-### On Linux
-Look in your distribution repo for a package called `kdeconnect-kde`,
-`kdeconnect-plasma`, just `kdeconnect` or `kde-connect`.
-If it's not there and you know how to build software from sources, you just
-found the repo :), instructions are
-[here](https://community.kde.org/KDEConnect#Linux_Desktop)
+## Key Highlights
 
-### On Mac or Windows
-Platforms other than Linux are not officially supported, as there has yet to be an official release of KDE Connect for MacOS or Windows. However, most of the features have already been ported to windows so you can compile KDE Connect for Windows using [Craft](https://community.kde.org/Craft). It hasn't yet been completely tested on MacOS, contributions and feedback are welcome!
+### 1. Floating Action Button & Shortcuts
+- **Customizable Overlay**: Fast floating bubble accessible from anywhere on the phone to trigger remote mousepad, clipboard sync, media controls, presentation, screen mirror, or custom commands.
+- **Drag-to-Close Dismissal**: Drag down to a highlighted bottom dismissal target to easily dismiss the floating button with haptic feedback.
+- **Quick Settings & Drawer Tile**: Toggle on/off seamlessly via the Android Quick Settings tile or the app navigation drawer.
+- **Permission Management**: Guided setup for "Display over other apps" overlay permission.
 
-### On BSD
-It should work, but no promises :)
+### 2. Multimedia Default Output Volume Control
+- Volume slider and hardware volume keys in the Multimedia screen automatically adjust the **currently active computer audio output sink** (Master / Speakers / Headphones) by default, with seamless fallback to player volume.
 
+### 3. Fixed Adaptive Icon & UI Polish
+- Calibrated Android adaptive icon safe-zone margins so the emblem is completely intact on all launcher masks (circular, squircle, pebble) without cut-off corners.
 
-## How does it work?
-KDE Connect consists of a UI-agnostic "core" library that exposes a series of DBus interfaces, and several UI components that consume these DBus interfaces. This way, new UI components can be added to integrate better with specific platforms or desktops, without having to reimplement the protocol or any of the internals. The core KDE Connect library is also divided into 4 big blocks:
+### 4. Automated Cross-Distro Linux Installer & Uninstaller
+- **Broad Distro Support**: Works out of the box on Arch/CachyOS (`pacman`), Ubuntu/Debian (`apt`), Fedora (`dnf`), and openSUSE (`zypper`).
+- **Interactive Sudo Handling**: Prompts for credentials cleanly upfront without terminal output flicker or background spinner interference.
+- **Comprehensive Uninstaller**: `./installer/uninstall.sh` cleanly stops background daemons, cleans firewall rules, prompts to remove the desktop package, and clears local pairing data.
 
-- **LinkProviders**: Are in charge of discovering other KDE Connect-enabled devices in the network and establishing a Link to them.
-- **Devices**: Represent a remote device, abstracting the specific Link that is being used to reach it.
-- **NetworkPackets**: JSON-serializable and self-contained pieces of information to be sent by the plugins between devices.
-- **Plugins**: Independent pieces of code that implement a specific feature. Plugins will use NetworkPackets to exchange information through the network with other Plugins on a remote Device.
+---
 
-The basic structure of a NetworkPacket is the following:
+## Quick Setup
 
-```json
-{
-  "id": 123456789,
-  "type": "com.example.myplugin",
-  "body": {  },
-  "version": 5
-}
+### 1. Linux Desktop Host Setup
+Run the automated installer on your Linux PC:
+```bash
+./installer/install.sh
 ```
 
-The content of the `"body"` section is defined by each Plugin. Hence, only the emitter and receiver plugins of a given packet type need agree on the contents of the body.
+To uninstall services and restore system defaults:
+```bash
+./installer/uninstall.sh
+```
 
-NetworkPackets can also have binary data attached that can't be serialized to JSON. In this case, two new fields will be added:
+### 2. Android Client Installation
+Transfer and install the APK on your device:
+- [`apk/KDEConnect.apk`](apk/KDEConnect.apk)
+- [`apk/kdeconnect-android-debug.apk`](apk/kdeconnect-android-debug.apk)
 
-`"payloadSize"`: The size of the file, or -1 if it is a stream without known size.
-`"payloadTransferInfo"`: Another JSON object where the specific Link can add information so the Link in the remote end can establish a connection and receive the payload (eg: IP and port in a local network). It's up to the Link implementation to decide how to use this field.
+Or install directly via USB / ADB:
+```bash
+adb install -r apk/KDEConnect.apk
+```
 
-## Contributing
+---
 
-To contribute patches, use [KDE Connect's GitLab](https://invent.kde.org/network/kdeconnect-kde). There you can also find a task list with stuff to do and links to other relevant resources. It is a good idea to also subscribe to the [KDE Connect mailing list](https://mail.kde.org/mailman/listinfo/kdeconnect). We can also be reached on IRC at #kdeconnect on irc.libera.chat or on [Telegram](https://t.me/joinchat/AOS6gA37orb2dZCLhqbZjg), contributions and feedback are warmly welcomed.
+## Network & Port Map
 
-For bug reporting, please use [KDE's Bugzilla](https://bugs.kde.org). Please do not use the issue tracker in GitLab since we want to keep everything in one place.
-
-Please know that all translations for all KDE apps are handled by the [localization team](https://l10n.kde.org/). If you would like to submit a translation, that should be done by working with the proper team for that language.
-
-## License
-[GNU GPL v2](https://www.gnu.org/licenses/gpl-2.0.html) and [GNU GPL v3](https://www.gnu.org/licenses/gpl-3.0.html)
-
-If you are reading this from Github, you should know that this is just a mirror of the [KDE Project repo](https://invent.kde.org/network/kdeconnect-kde).
+| Port | Protocol | Purpose |
+| :--- | :--- | :--- |
+| **1714 - 1764** | UDP / TCP | Core KDE Connect discovery, pairing, and packet routing |
+| **22** | TCP | OpenSSH service (SFTP file browsing & secure remote shell) |
+| **59001** | TCP / HTTP | Streamer daemon (Screen mirror, audio stream, Task Manager API, Live Terminal) |
+| **59002** | TCP (Raw) | Ultra-low latency phone microphone passthrough (`Phone_Microphone`) |

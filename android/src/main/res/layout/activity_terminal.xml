@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SPDX-FileCopyrightText: 2026 Antigravity
+  SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
+-->
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#121212"
+    tools:context="org.kde.kdeconnect.plugins.terminal.TerminalActivity">
+
+    <include layout="@layout/toolbar" android:id="@+id/toolbar_layout" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <!-- Active Host & Session Status Header -->
+        <LinearLayout
+            android:id="@+id/layout_ssh_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#1A1A1A"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="12dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="6dp">
+
+            <ImageView
+                android:id="@+id/icon_ssh_status"
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:contentDescription="SSH Status"
+                android:src="@drawable/ic_action_refresh_24dp" />
+
+            <TextView
+                android:id="@+id/text_ssh_status"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:fontFamily="monospace"
+                android:text="SSH Disconnected"
+                android:textColor="#B0BEC5"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/btn_ssh_configure"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
+                android:text="[Connect]"
+                android:textColor="#64B5F6"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- Terminal Output View -->
+        <ScrollView
+            android:id="@+id/scroll_output"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:background="#0C0C0C"
+            android:fillViewport="true"
+            android:padding="12dp">
+
+            <TextView
+                android:id="@+id/text_terminal_output"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:lineSpacingMultiplier="1.1"
+                android:textIsSelectable="true"
+                android:textColor="#E0E0E0"
+                android:textSize="13sp"
+                tools:text="user@host:~$ fastfetch" />
+        </ScrollView>
+
+        <!-- Bottom Keyboard Accessory Toolbar & Input Bar -->
+        <LinearLayout
+            android:id="@+id/layout_input_bar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#1E1E1E"
+            android:orientation="vertical">
+
+            <!-- Horizontal Shortcut Bar: Ordered as Stop/Ctrl+C, Up, Down, Tab, Clear, Esc, Ctrl+D, Ctrl+Z -->
+            <HorizontalScrollView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="#161616"
+                android:paddingStart="8dp"
+                android:paddingTop="6dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="6dp"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <!-- 1. Stop / Ctrl+C Button -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_stop"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:layout_marginEnd="6dp"
+                        android:backgroundTint="#B71C1C"
+                        android:text="Stop / Ctrl+C"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        app:cornerRadius="8dp" />
+
+                    <!-- 2. History Up -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_history_up"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:layout_marginEnd="6dp"
+                        android:text="▲ Up"
+                        android:textColor="#E0E0E0"
+                        android:textSize="11sp"
+                        app:cornerRadius="8dp"
+                        app:strokeColor="#444444" />
+
+                    <!-- 3. History Down -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_history_down"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:layout_marginEnd="6dp"
+                        android:text="▼ Down"
+                        android:textColor="#E0E0E0"
+                        android:textSize="11sp"
+                        app:cornerRadius="8dp"
+                        app:strokeColor="#444444" />
+
+                    <!-- 4. Tab Key -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_tab"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:layout_marginEnd="6dp"
+                        android:text="Tab ⇥"
+                        android:textColor="#E0E0E0"
+                        android:textSize="11sp"
+                        app:cornerRadius="8dp"
+                        app:strokeColor="#444444" />
+
+                    <!-- 5. Clear -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_clear"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:layout_marginEnd="6dp"
+                        android:text="Clear ⌫"
+                        android:textColor="#E0E0E0"
+                        android:textSize="11sp"
+                        app:cornerRadius="8dp" />
+
+                    <!-- 6. Esc Key -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_esc"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:layout_marginEnd="6dp"
+                        android:text="Esc ⎋"
+                        android:textColor="#E0E0E0"
+                        android:textSize="11sp"
+                        app:cornerRadius="8dp"
+                        app:strokeColor="#444444" />
+
+                    <!-- 7. Ctrl+D (EOF) -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_eof"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:layout_marginEnd="6dp"
+                        android:text="Ctrl+D"
+                        android:textColor="#E0E0E0"
+                        android:textSize="11sp"
+                        app:cornerRadius="8dp"
+                        app:strokeColor="#444444" />
+
+                    <!-- 8. Ctrl+Z -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_ctrl_z"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:text="Ctrl+Z"
+                        android:textColor="#E0E0E0"
+                        android:textSize="11sp"
+                        app:cornerRadius="8dp"
+                        app:strokeColor="#444444" />
+                </LinearLayout>
+            </HorizontalScrollView>
+
+            <!-- Command Input Bar -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="#1E1E1E"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="12dp"
+                android:paddingTop="6dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="6dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="$ "
+                    android:textColor="#00E676"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/edit_terminal_input"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@null"
+                    android:fontFamily="monospace"
+                    android:hint="@string/terminal_input_hint"
+                    android:imeOptions="actionSend"
+                    android:inputType="textNoSuggestions"
+                    android:maxLines="3"
+                    android:padding="8dp"
+                    android:textColor="#FFFFFF"
+                    android:textColorHint="#757575"
+                    android:textSize="14sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_send_command"
+                    style="@style/KdeConnectButton.IconButton"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:contentDescription="@string/send"
+                    app:icon="@drawable/ic_baseline_send_24"
+                    app:iconTint="#00E676" />
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </LinearLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

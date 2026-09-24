@@ -1,0 +1,709 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+SPDX-FileCopyrightText: 2026 Antigravity
+SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
+-->
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0A0C10"
+    tools:context="org.kde.kdeconnect.plugins.screenmirror.ScreenMirrorActivity">
+
+    <include layout="@layout/toolbar" android:id="@+id/toolbar_layout" />
+
+    <RelativeLayout
+        android:id="@+id/root_relative_layout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:keepScreenOn="true"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <!-- Screen Mirror Stream ImageView (Fit laptop screen aspect ratio) -->
+        <ImageView
+            android:id="@+id/screen_image_view"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="fitCenter"
+            android:contentDescription="@string/pref_plugin_screenmirror" />
+
+        <!-- KeyListenerView for handling hardware & soft keyboard input -->
+        <org.kde.kdeconnect.plugins.mousepad.KeyListenerView
+            android:id="@+id/keyListener"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:focusedByDefault="true"
+            android:contentDescription="@string/mousepad_info_no_gestures" />
+
+        <!-- ======================================================== -->
+        <!-- PORTRAIT: Top Controls Overlay (Audio, Screenshot & REC) -->
+        <!-- ======================================================== -->
+        <LinearLayout
+            android:id="@+id/top_controls_overlay"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_alignParentTop="true"
+            android:layout_marginStart="10dp"
+            android:layout_marginEnd="10dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_screen_mirror_panel"
+            android:orientation="vertical"
+            android:padding="8dp">
+
+            <!-- Row 1: Audio / Mic & Screenshot -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <!-- Speaker Toggle Button (Laptop Audio -> Phone) -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_stream_speaker"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:text="Audio"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    app:cornerRadius="12dp"
+                    app:icon="@drawable/ic_volume"
+                    app:iconPadding="4dp"
+                    app:iconSize="16dp" />
+
+                
+
+                <!-- Phone Mic Toggle Button (Phone Mic -> Laptop) -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_stream_mic"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:layout_marginStart="6dp"
+                    android:text="Phone Mic"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    app:cornerRadius="12dp"
+                    app:icon="@drawable/ic_mic_white"
+                    app:iconPadding="4dp"
+                    app:iconSize="16dp" />
+
+                <!-- Screenshot Button -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_screenshot"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="40dp"
+                    android:layout_height="match_parent"
+                    android:layout_marginStart="6dp"
+                    android:padding="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:contentDescription="Take Screenshot"
+                    app:cornerRadius="12dp"
+                    app:icon="@drawable/ic_camera_24dp"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconSize="18dp" />
+            </LinearLayout>
+
+            <!-- Row 2: Recording Controls -->
+            <LinearLayout
+                android:id="@+id/layout_record_container_portrait"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:layout_marginTop="6dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <!-- Recording Status / Timer Badge -->
+                <TextView
+                    android:id="@+id/text_record_timer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="● REC 00:00"
+                    android:textColor="#FF5252"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="8dp"
+                    android:visibility="gone" />
+
+                <!-- Main Button 1: Record / Stop -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_record_start_stop"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:padding="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:contentDescription="Record / Stop"
+                    app:cornerRadius="12dp"
+                    app:icon="@drawable/ic_record_dot_24dp"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconSize="20dp" />
+
+                <!-- Main Button 2: Pause / Resume (Disabled when not recording) -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_record_pause_resume"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:layout_marginStart="6dp"
+                    android:padding="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:enabled="false"
+                    android:alpha="0.4"
+                    android:contentDescription="Pause / Resume"
+                    app:cornerRadius="12dp"
+                    app:icon="@drawable/ic_pause_white"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconSize="18dp" />
+
+                <!-- Main Button 3: Discard (Disabled when not recording) -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_record_discard"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:layout_marginStart="6dp"
+                    android:padding="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:enabled="false"
+                    android:alpha="0.4"
+                    android:contentDescription="Discard Recording"
+                    app:cornerRadius="12dp"
+                    app:icon="@drawable/ic_delete"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconTint="#FF5252"
+                    app:iconSize="18dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Live Stream Stats Badge (FPS & Bitrate HUD) in Portrait -->
+        <LinearLayout
+            android:id="@+id/layout_stream_stats"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_below="@+id/top_controls_overlay"
+            android:layout_alignParentStart="true"
+            android:layout_marginStart="12dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_screen_mirror_pill"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/text_stream_stats"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="● 60.0 FPS • 35 KB"
+                android:textColor="#00E676"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- ======================================================== -->
+        <!-- PORTRAIT: Bottom Controls Container (Keystrokes & Mouse) -->
+        <!-- ======================================================== -->
+        <ScrollView
+            android:id="@+id/bottom_controls_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_alignParentBottom="true"
+            android:layout_marginStart="10dp"
+            android:layout_marginEnd="10dp"
+            android:layout_marginBottom="10dp"
+            android:background="@drawable/bg_screen_mirror_panel"
+            android:fillViewport="true">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="8dp">
+
+                <!-- Live Keystroke Input Row -->
+                <LinearLayout
+                    android:id="@+id/layout_keystrokes_container"
+                    android:layout_width="match_parent"
+                    android:layout_height="46dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="8dp">
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/input_layout_keystrokes"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        app:hintEnabled="false"
+                        app:boxBackgroundMode="outline"
+                        app:boxCornerRadiusTopStart="12dp"
+                        app:boxCornerRadiusTopEnd="12dp"
+                        app:boxCornerRadiusBottomStart="12dp"
+                        app:boxCornerRadiusBottomEnd="12dp"
+                        app:boxStrokeWidth="1dp"
+                        app:boxStrokeWidthFocused="1.5dp"
+                        app:boxStrokeColor="@color/box_stroke_selector">
+
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/edit_live_keystrokes"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:inputType="text"
+                            android:imeOptions="actionSend"
+                            android:singleLine="true"
+                            
+                            android:paddingStart="12dp"
+                            android:paddingEnd="12dp"
+                            android:paddingTop="0dp"
+                            android:paddingBottom="0dp"
+                            android:gravity="center_vertical"
+                            android:textSize="13sp" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_send_keystrokes"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="match_parent"
+                        android:layout_marginStart="8dp"
+                        android:text="Send"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        app:cornerRadius="12dp"
+                        app:icon="@drawable/ic_baseline_send_24"
+                        app:iconPadding="4dp"
+                        app:iconSize="16dp" />
+                </LinearLayout>
+
+                <!-- 3 Mouse Buttons Bar: Left, Middle, Right -->
+                <LinearLayout
+                    android:id="@+id/mouse_buttons"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:orientation="horizontal">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/mouse_click_left"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:text="Left Click"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        app:cornerRadius="12dp"
+                        app:icon="@drawable/left_click_48dp"
+                        app:iconPadding="4dp"
+                        app:iconSize="18dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/mouse_click_middle"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:layout_marginStart="8dp"
+                        android:text="Middle Click"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        app:cornerRadius="12dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/mouse_click_right"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:layout_marginStart="8dp"
+                        android:text="Right Click"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        app:cornerRadius="12dp"
+                        app:icon="@drawable/right_click_48dp"
+                        app:iconPadding="4dp"
+                        app:iconSize="18dp" />
+                </LinearLayout>
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- ======================================================== -->
+        <!-- LANDSCAPE: Left Sidebar (Recording & Mouse, Pure Icons)  -->
+        <!-- ======================================================== -->
+        <ScrollView
+            android:id="@+id/landscape_left_sidebar"
+            android:layout_width="52dp"
+            android:layout_height="wrap_content"
+            android:layout_alignParentStart="true"
+            android:layout_centerVertical="true"
+            android:layout_marginStart="10dp"
+            android:background="@drawable/bg_screen_mirror_sidebar"
+            android:fillViewport="true"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp">
+
+                <!-- Screenshot Button (Pure Icon) -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_screenshot_land"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:padding="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:contentDescription="Take Screenshot"
+                    app:cornerRadius="12dp"
+                    app:icon="@drawable/ic_camera_24dp"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconSize="18dp" />
+
+                <!-- Record Start/Stop (Pure Icon) -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_record_start_stop_land"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginTop="6dp"
+                    android:padding="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:contentDescription="Record / Stop"
+                    app:cornerRadius="12dp"
+                    app:icon="@drawable/ic_record_dot_24dp"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconSize="20dp" />
+
+                <!-- Pause/Resume (Pure Icon) -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_record_pause_resume_land"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginTop="6dp"
+                    android:padding="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:enabled="false"
+                    android:alpha="0.4"
+                    android:contentDescription="Pause / Resume"
+                    app:cornerRadius="12dp"
+                    app:icon="@drawable/ic_pause_white"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconSize="18dp" />
+
+                <!-- Discard (Pure Icon) -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_record_discard_land"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginTop="6dp"
+                    android:padding="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:enabled="false"
+                    android:alpha="0.4"
+                    android:contentDescription="Discard Recording"
+                    app:cornerRadius="12dp"
+                    app:icon="@drawable/ic_delete"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconTint="#FF5252"
+                    app:iconSize="18dp" />
+
+                <!-- Landscape Rec Timer Badge -->
+                <TextView
+                    android:id="@+id/text_record_timer_land"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:fontFamily="monospace"
+                    android:text="● REC"
+                    android:textColor="#FF5252"
+                    android:textSize="9sp"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
+
+                <View
+                    android:layout_width="32dp"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="6dp"
+                    android:layout_marginBottom="6dp"
+                    android:background="#33FFFFFF" />
+
+                <!-- Keyboard Toggle (Pure Icon) -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_keyboard_land"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:padding="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:contentDescription="Open Keyboard"
+                    app:cornerRadius="12dp"
+                    app:icon="@drawable/ic_action_keyboard_24dp"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconSize="20dp" />
+
+                <!-- Mouse Left Click (Pure Icon) -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/mouse_click_left_land"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginTop="6dp"
+                    android:padding="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:contentDescription="Left Click"
+                    app:cornerRadius="12dp"
+                    app:icon="@drawable/left_click_48dp"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconSize="20dp" />
+
+                <!-- Mouse Middle Click (Pure Icon) -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/mouse_click_middle_land"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginTop="6dp"
+                    android:padding="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:contentDescription="Middle Click"
+                    android:text="M"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    app:cornerRadius="12dp" />
+
+                <!-- Mouse Right Click (Pure Icon) -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/mouse_click_right_land"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginTop="6dp"
+                    android:padding="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:contentDescription="Right Click"
+                    app:cornerRadius="12dp"
+                    app:icon="@drawable/right_click_48dp"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconSize="20dp" />
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- ======================================================== -->
+        <!-- LANDSCAPE: Right Sidebar (All Top Options, Pure Icons) -->
+        <!-- ======================================================== -->
+        <ScrollView
+            android:id="@+id/landscape_right_sidebar"
+            android:layout_width="52dp"
+            android:layout_height="wrap_content"
+            android:layout_alignParentEnd="true"
+            android:layout_centerVertical="true"
+            android:layout_marginEnd="10dp"
+            android:background="@drawable/bg_screen_mirror_sidebar"
+            android:fillViewport="true"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp">
+
+                <!-- Speaker Toggle Button (Pure Icon) -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_stream_speaker_land"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:padding="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:contentDescription="Laptop Audio"
+                    app:cornerRadius="12dp"
+                    app:icon="@drawable/ic_volume"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconSize="20dp" />
+
+                
+
+                <!-- Mic Toggle Button (Pure Icon) -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_stream_mic_land"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginTop="6dp"
+                    android:padding="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:contentDescription="Phone Mic"
+                    app:cornerRadius="12dp"
+                    app:icon="@drawable/ic_mic_white"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconSize="20dp" />
+
+                <!-- Fullscreen Toggle Button (Pure Icon) -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_fullscreen_land"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginTop="6dp"
+                    android:padding="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:contentDescription="Fullscreen"
+                    app:cornerRadius="12dp"
+                    app:icon="@drawable/ic_fullscreen_exit"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconSize="20dp" />
+
+                <!-- Live Stream Stats Badge in Landscape -->
+                <TextView
+                    android:id="@+id/text_stream_stats_land"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:fontFamily="monospace"
+                    android:text="60\nFPS"
+                    android:gravity="center"
+                    android:textColor="#00E676"
+                    android:textSize="9sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- Stream Play Overlay in Center (When Paused) -->
+        <LinearLayout
+            android:id="@+id/layout_play_overlay"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerInParent="true"
+            android:background="@drawable/bg_screen_mirror_panel"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="20dp"
+            android:visibility="gone">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_big_play"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:padding="0dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                app:cornerRadius="28dp"
+                app:icon="@drawable/ic_play_white"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconSize="32dp" />
+
+            <TextView
+                android:id="@+id/text_play_overlay"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:gravity="center"
+                android:text="Screen Stream is Paused"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- Status / Connection Failure Overlay -->
+        <LinearLayout
+            android:id="@+id/status_overlay"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerInParent="true"
+            android:background="@drawable/bg_screen_mirror_panel"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="20dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/text_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="@string/screenmirror_waiting_stream"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_reconnect"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:layout_marginTop="12dp"
+                android:text="Reconnect Stream"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                app:cornerRadius="12dp" />
+        </LinearLayout>
+
+        <!-- Pure Floating Icon for Exit Fullscreen (When in immersive fullscreen mode) -->
+        <ImageButton
+            android:id="@+id/fab_exit_fullscreen"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_alignParentEnd="true"
+            android:layout_alignParentBottom="true"
+            android:layout_marginEnd="16dp"
+            android:layout_marginBottom="16dp"
+            android:background="@drawable/bg_screen_mirror_pill"
+            android:src="@drawable/ic_fullscreen_exit"
+            android:scaleType="centerInside"
+            android:contentDescription="Exit Fullscreen"
+            android:visibility="gone" />
+
+    </RelativeLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

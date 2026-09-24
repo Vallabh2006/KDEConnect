@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/floating_dismiss_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:gravity="center_horizontal"
+    android:paddingBottom="32dp"
+    android:visibility="gone">
+
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/floating_dismiss_circle"
+        android:layout_width="64dp"
+        android:layout_height="64dp"
+        app:cardCornerRadius="32dp"
+        app:cardElevation="8dp"
+        app:cardBackgroundColor="#80000000"
+        app:strokeWidth="2dp"
+        app:strokeColor="#80FFFFFF">
+
+        <ImageView
+            android:id="@+id/floating_dismiss_icon"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_gravity="center"
+            android:src="@drawable/ic_trash_white_24dp"
+            app:tint="#FFFFFF"
+            android:contentDescription="@string/drag_to_close" />
+
+    </com.google.android.material.card.MaterialCardView>
+
+    <TextView
+        android:id="@+id/floating_dismiss_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:text="@string/drag_to_close"
+        android:textColor="#FFFFFF"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:shadowColor="#80000000"
+        android:shadowRadius="4"
+        android:shadowDx="0"
+        android:shadowDy="2" />
+
+</LinearLayout>

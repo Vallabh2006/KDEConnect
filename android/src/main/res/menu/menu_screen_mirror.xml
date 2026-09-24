@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:kdeconnect="http://schemas.android.com/apk/res-auto">
+
+    <item
+        android:id="@+id/menu_stream_toggle"
+        android:icon="@drawable/ic_stop"
+        android:title="Stop Stream"
+        kdeconnect:iconTint="?colorOnBackground"
+        kdeconnect:showAsAction="always" />
+
+    <item
+        android:id="@+id/menu_clipboard"
+        android:icon="@drawable/ic_baseline_content_paste_24"
+        android:title="@string/screenmirror_clipboard_dialog_title"
+        kdeconnect:iconTint="?colorOnBackground"
+        kdeconnect:showAsAction="always" />
+
+    <item
+        android:id="@+id/menu_refresh_stream"
+        android:icon="@drawable/ic_action_refresh_24dp"
+        android:title="@string/screenmirror_refresh_stream"
+        kdeconnect:iconTint="?colorOnBackground"
+        kdeconnect:showAsAction="ifRoom" />
+
+    <item
+        android:id="@+id/menu_fullscreen"
+        android:icon="@drawable/ic_open_in_full_24dp"
+        android:title="@string/enable_fullscreen"
+        kdeconnect:iconTint="?colorOnBackground"
+        kdeconnect:showAsAction="ifRoom" />
+
+    <item
+        android:id="@+id/menu_settings"
+        android:icon="@drawable/ic_settings_24dp"
+        android:title="Settings"
+        kdeconnect:showAsAction="never" />
+
+    <item
+        android:id="@+id/menu_take_screenshot"
+        android:icon="@drawable/ic_camera_24dp"
+        android:title="Take Screenshot"
+        kdeconnect:showAsAction="never" />
+
+    <item
+        android:id="@+id/menu_toggle_buttons"
+        android:title="Toggle Buttons"
+        kdeconnect:showAsAction="never" />
+</menu>

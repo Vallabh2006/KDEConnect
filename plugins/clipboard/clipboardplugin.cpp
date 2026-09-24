@@ -146,8 +146,18 @@ void ClipboardPlugin::sendConnectPacket()
         return;
     }
 
+    QVariant content = ClipboardListener::instance()->currentContent();
+    if (!content.isValid() || content.isNull() || content.typeId() == QMetaType::QUrl || ClipboardListener::instance()->currentContentType() == ClipboardListener::ClipboardContentTypeFile) {
+        return;
+    }
+
+    QString contentStr = content.toString().trimmed();
+    if (contentStr.isEmpty() || contentStr == QLatin1String("null") || contentStr.startsWith(QLatin1String("file://")) || contentStr.startsWith(QLatin1String("content://"))) {
+        return;
+    }
+
     NetworkPacket np(PACKET_TYPE_CLIPBOARD_CONNECT,
-                     {{QStringLiteral("content"), ClipboardListener::instance()->currentContent()},
+                     {{QStringLiteral("content"), contentStr},
                       {QStringLiteral("timestamp"), ClipboardListener::instance()->updateTimestamp()}});
     sendPacket(np);
 }

@@ -8,8 +8,14 @@ import time
 import socket
 import io
 import queue
-import pty
-import select
+try:
+    import pty
+    import select
+    HAS_PTY = True
+except ImportError:
+    pty = None
+    select = None
+    HAS_PTY = False
 import subprocess
 import threading
 import glob
@@ -21,12 +27,70 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from PIL import Image
+import tempfile
+import ctypes
+try:
+    from ctypes import wintypes
+except Exception:
+    wintypes = None
+
+try:
+    import psutil
+except ImportError:
+    psutil = None
+import platform
+
+try:
+    import cv2
+    import numpy as np
+except Exception:
+    cv2 = None
+    np = None
+
+try:
+    import pyaudiowpatch as pyaudio
+except Exception:
+    try:
+        import pyaudio
+    except Exception:
+        pyaudio = None
 
 PORT = 59001
 MAX_WIDTH = 1920
 MAX_HEIGHT = 1080
 JPEG_QUALITY = 80
 NUM_WORKERS = 4
+
+if os.name == "nt":
+    DEFAULT_CONFIG_DIR = Path(os.environ.get("APPDATA", os.path.expanduser("~"))) / "KDEConnect"
+else:
+    DEFAULT_CONFIG_DIR = Path.home() / ".config" / "kdeconnect"
+DEFAULT_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+CONFIG_FILE = DEFAULT_CONFIG_DIR / "streamer_config.json"
+
+def get_streamer_config():
+    default_rec_dir = str(Path.home() / "Videos" / "KDEConnect") if os.name == "nt" else str(Path.home() / "Videos" / "Kdeconnect")
+    defaults = {
+        "recording_dir": default_rec_dir
+    }
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                defaults.update(data)
+        except Exception:
+            pass
+    return defaults
+
+def save_streamer_config(cfg):
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+    except Exception:
+        pass
+
+def get_uid():
+    return getattr(os, "getuid", lambda: 1000)()
 
 class PtyTerminalSession:
     def __init__(self):
@@ -38,8 +102,35 @@ class PtyTerminalSession:
         self.running = False
         self.reader_thread = None
 
-    def start(self, cmd="bash"):
+    def start(self, cmd=None):
         self.stop()
+        if os.name == "nt":
+            try:
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = 0
+                creationflags = subprocess.CREATE_NO_WINDOW
+                cmd_exe = cmd if cmd else "powershell.exe -NoLogo -NoExit"
+                user_home = os.path.expanduser("~")
+                self.proc = subprocess.Popen(
+                    cmd_exe,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    startupinfo=si,
+                    creationflags=creationflags,
+                    bufsize=0,
+                    cwd=user_home
+                )
+                self.running = True
+                self.reader_thread = threading.Thread(target=self._pipe_read_loop, daemon=True)
+                self.reader_thread.start()
+                return True
+            except Exception as e:
+                print("[!] Windows terminal start error: " + str(e))
+                return False
+        if not HAS_PTY:
+            return False
         try:
             self.master, self.slave = pty.openpty()
             env = os.environ.copy()
@@ -58,7 +149,7 @@ class PtyTerminalSession:
                 stderr=self.slave,
                 env=env,
                 close_fds=True,
-                preexec_fn=os.setsid
+                preexec_fn=getattr(os, "setsid", None)
             )
             try:
                 os.close(self.slave)
@@ -74,8 +165,20 @@ class PtyTerminalSession:
             print("[!] PTY error: " + str(e))
             return False
 
+    def _pipe_read_loop(self):
+        while self.running and self.proc and self.proc.stdout:
+            try:
+                data = self.proc.stdout.read(1024)
+                if not data:
+                    break
+                with self.lock:
+                    self.output_buffer.extend(data)
+            except Exception:
+                break
+        self.running = False
+
     def _read_loop(self):
-        while self.running and self.master is not None:
+        while self.running and self.master is not None and select is not None:
             try:
                 r, _, _ = select.select([self.master], [], [], 0.05)
                 if r:
@@ -89,6 +192,13 @@ class PtyTerminalSession:
         self.running = False
 
     def write_input(self, text):
+        if self.proc and self.proc.stdin and (not HAS_PTY or os.name == "nt"):
+            try:
+                self.proc.stdin.write(text.encode("utf-8"))
+                self.proc.stdin.flush()
+                return True
+            except Exception:
+                return False
         if self.master is not None:
             try:
                 os.write(self.master, text.encode("utf-8"))
@@ -124,7 +234,76 @@ class PtyTerminalSession:
             self.master = None
 
 global_pty = PtyTerminalSession()
-global_pty.start("bash")
+if os.name != "nt":
+    global_pty.start("bash")
+# On Windows: terminal starts lazily on first /terminal_input request
+
+def _get_clipboard_windows():
+    for _ in range(3):
+        try:
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+            kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+            kernel32.GlobalLock.restype = ctypes.c_void_p
+            kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+            user32.GetClipboardData.restype = ctypes.c_void_p
+
+            if not user32.OpenClipboard(None):
+                time.sleep(0.02)
+                continue
+            try:
+                h = user32.GetClipboardData(13)
+                if not h:
+                    return ""
+                p = kernel32.GlobalLock(h)
+                if not p:
+                    return ""
+                try:
+                    val = ctypes.c_wchar_p(p).value or ""
+                    return val
+                finally:
+                    kernel32.GlobalUnlock(h)
+            finally:
+                user32.CloseClipboard()
+        except Exception:
+            time.sleep(0.02)
+    return ""
+
+def _set_clipboard_windows(text):
+    for _ in range(3):
+        try:
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+            kernel32.GlobalAlloc.restype = ctypes.c_void_p
+            kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
+            kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+            kernel32.GlobalLock.restype = ctypes.c_void_p
+            kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+            user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+            user32.SetClipboardData.restype = ctypes.c_void_p
+
+            data = (text + '\0').encode('utf-16le')
+            h = kernel32.GlobalAlloc(0x0042, len(data))
+            if not h:
+                return False
+            p = kernel32.GlobalLock(h)
+            if not p:
+                return False
+            ctypes.memmove(p, data, len(data))
+            kernel32.GlobalUnlock(h)
+
+            if not user32.OpenClipboard(None):
+                time.sleep(0.02)
+                continue
+            try:
+                user32.EmptyClipboard()
+                user32.SetClipboardData(13, h)
+                return True
+            finally:
+                user32.CloseClipboard()
+        except Exception:
+            time.sleep(0.02)
+    return False
 
 def is_valid_clip(text):
     if not text:
@@ -135,11 +314,16 @@ def is_valid_clip(text):
     return True
 
 def get_laptop_clipboard():
+    if os.name == "nt":
+        res = _get_clipboard_windows().strip()
+        if is_valid_clip(res):
+            return res
+        return ""
     env = os.environ.copy()
     if "DISPLAY" not in env: env["DISPLAY"] = ":0"
     if "WAYLAND_DISPLAY" not in env: env["WAYLAND_DISPLAY"] = "wayland-0"
-    if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
-    if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{os.getuid()}/bus"
+    if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{get_uid()}"
+    if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{get_uid()}/bus"
 
     for cmd in [
         ["wl-paste", "-n", "--type", "text/plain;charset=utf-8"],
@@ -161,6 +345,8 @@ def get_laptop_clipboard_history():
     current = get_laptop_clipboard()
     if is_valid_clip(current):
         clips.append(current)
+    if os.name == "nt":
+        return clips[:50]
     try:
         out = subprocess.check_output(["qdbus6", "org.kde.klipper", "/klipper", "getClipboardHistoryMenu"], text=True, timeout=1)
         for line in out.splitlines():
@@ -245,11 +431,17 @@ def set_laptop_clipboard(text):
     if not is_valid_clip(text):
         return False
     safe_text = text.strip()
+    if os.name == "nt":
+        ok = _set_clipboard_windows(safe_text)
+        if ok:
+            clipboard_monitor.update(safe_text)
+            return True
+        return False
     env = os.environ.copy()
     if "DISPLAY" not in env: env["DISPLAY"] = ":0"
     if "WAYLAND_DISPLAY" not in env: env["WAYLAND_DISPLAY"] = "wayland-0"
-    if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
-    if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{os.getuid()}/bus"
+    if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{get_uid()}"
+    if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{get_uid()}/bus"
 
     success = False
     for prog in ["wl-copy", "xclip"]:
@@ -276,9 +468,26 @@ def set_laptop_clipboard(text):
     return True
 
 def get_laptop_volume():
+    if os.name == "nt":
+        try:
+            try:
+                import comtypes
+                comtypes.CoInitialize()
+            except Exception:
+                pass
+            from pycaw.pycaw import AudioUtilities
+            speakers = AudioUtilities.GetSpeakers()
+            volume = speakers.EndpointVolume
+            current = int(round(volume.GetMasterVolumeLevelScalar() * 100))
+            is_muted = bool(volume.GetMute())
+            return {"volume": current, "muted": is_muted}
+        except Exception:
+            return {"volume": 50, "muted": False}
+
     env = os.environ.copy()
-    if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
-    if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{os.getuid()}/bus"
+    uid = os.getuid() if hasattr(os, "getuid") else 1000
+    if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
+    if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{uid}/bus"
 
     try:
         out = subprocess.check_output(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"], env=env, text=True, timeout=1).strip()
@@ -316,9 +525,34 @@ def get_laptop_volume():
     return {"volume": 50, "muted": False}
 
 def set_laptop_volume(vol_pct=None, mute=None):
+    if os.name == "nt":
+        try:
+            try:
+                import comtypes
+                comtypes.CoInitialize()
+            except Exception:
+                pass
+            from pycaw.pycaw import AudioUtilities
+            speakers = AudioUtilities.GetSpeakers()
+            volume = speakers.EndpointVolume
+            if vol_pct is not None:
+                val = max(0.0, min(1.0, float(vol_pct) / 100.0))
+                volume.SetMasterVolumeLevelScalar(val, None)
+            if mute is not None:
+                if isinstance(mute, bool):
+                    volume.SetMute(int(mute), None)
+                elif str(mute).lower() == "toggle":
+                    curr = bool(volume.GetMute())
+                    volume.SetMute(int(not curr), None)
+            return get_laptop_volume()
+        except Exception:
+            pass
+        return {"volume": 50, "muted": False}
+
     env = os.environ.copy()
-    if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
-    if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{os.getuid()}/bus"
+    uid = os.getuid() if hasattr(os, "getuid") else 1000
+    if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
+    if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{uid}/bus"
 
     if vol_pct is not None:
         try:
@@ -496,6 +730,199 @@ def get_live_token_stats():
     }
 
 def get_task_manager_stats():
+    if os.name == "nt" or (psutil and not os.path.exists("/proc/stat")):
+        cpu_pct = 0.0
+        cpu_count = os.cpu_count() or 1
+        load1 = load5 = load15 = 0.0
+        if psutil:
+            try:
+                cpu_pct = psutil.cpu_percent(interval=None)
+            except Exception:
+                pass
+
+        mem_used = mem_total = mem_free = mem_cached = swap_used = swap_total = 0
+        if psutil:
+            try:
+                vmem = psutil.virtual_memory()
+                mem_total = int(vmem.total / (1024 * 1024))
+                mem_used = int(vmem.used / (1024 * 1024))
+                mem_free = int(vmem.available / (1024 * 1024))
+                mem_cached = int(getattr(vmem, 'cached', 0) / (1024 * 1024))
+                swap = psutil.swap_memory()
+                swap_total = int(swap.total / (1024 * 1024))
+                swap_used = int(swap.used / (1024 * 1024))
+            except Exception:
+                pass
+
+        disks = []
+        if psutil:
+            try:
+                for part in psutil.disk_partitions(all=False):
+                    try:
+                        usage = psutil.disk_usage(part.mountpoint)
+                        disks.append({
+                            "mount": part.mountpoint,
+                            "fs": part.fstype,
+                            "total_gb": round(usage.total / (1024**3), 1),
+                            "used_gb": round(usage.used / (1024**3), 1),
+                            "free_gb": round(usage.free / (1024**3), 1),
+                            "percent": int(usage.percent)
+                        })
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        gpu_info = {"name": "", "util": 0.0, "mem_used_mb": 0, "mem_total_mb": 0}
+        uptime_str = "--"
+        boot_time_str = "--"
+        if psutil:
+            try:
+                btime = psutil.boot_time()
+                uptime_sec = int(time.time() - btime)
+                days = uptime_sec // 86400
+                hours = (uptime_sec % 86400) // 3600
+                mins = (uptime_sec % 3600) // 60
+                uptime_str = f"{days}d {hours}h {mins}m" if days else f"{hours}h {mins}m"
+                boot_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(btime))
+            except Exception:
+                pass
+
+        net_rx = net_tx = 0
+        interfaces = []
+        if psutil:
+            try:
+                net_io = psutil.net_io_counters(pernic=True)
+                for iface_name, io_stat in net_io.items():
+                    rx_mb = int(io_stat.bytes_recv / (1024 * 1024))
+                    tx_mb = int(io_stat.bytes_sent / (1024 * 1024))
+                    net_rx += rx_mb
+                    net_tx += tx_mb
+                    interfaces.append({"name": iface_name, "rx_mb": rx_mb, "tx_mb": tx_mb})
+            except Exception:
+                pass
+
+        os_name_detected = f"Windows {platform.release()}" if os.name == "nt" else "Windows"
+        kernel_str = platform.version()
+        hostname_str = socket.gethostname()
+        cpu_model = platform.processor() or "x86_64 CPU"
+        cpu_temp = 0.0
+
+        procs = []
+        if psutil:
+            try:
+                for p in psutil.process_iter(['pid', 'ppid', 'name', 'username', 'cpu_percent', 'memory_info', 'status']):
+                    try:
+                        pinfo = p.info
+                        mem_mb = int(pinfo['memory_info'].rss / (1024 * 1024)) if pinfo['memory_info'] else 0
+                        procs.append({
+                            "pid": pinfo['pid'],
+                            "ppid": pinfo['ppid'] or 0,
+                            "user": pinfo['username'] or "",
+                            "cpu": pinfo['cpu_percent'] or 0.0,
+                            "mem_mb": mem_mb,
+                            "state": pinfo['status'] or "running",
+                            "name": pinfo['name'] or "",
+                            "cmd": pinfo['name'] or "",
+                            "data_rx_mb": 0.0,
+                            "data_tx_mb": 0.0,
+                            "data_total_mb": 0.0
+                        })
+                    except Exception:
+                        pass
+                procs.sort(key=lambda x: x["cpu"], reverse=True)
+            except Exception:
+                pass
+        services = []
+        if psutil and hasattr(psutil, 'win_service_iter'):
+            try:
+                for s in psutil.win_service_iter():
+                    try:
+                        sinfo = s.as_dict()
+                        s_name = sinfo.get('name', '')
+                        s_disp = sinfo.get('display_name', s_name) or s_name
+                        s_status = sinfo.get('status', 'stopped')
+                        services.append({
+                            "unit": s_name,
+                            "load": "loaded",
+                            "active": "active" if s_status == "running" else "inactive",
+                            "sub": s_status,
+                            "desc": s_disp,
+                            "is_system": True,
+                            "data_rx_mb": 0.0,
+                            "data_tx_mb": 0.0,
+                            "data_total_mb": 0.0
+                        })
+                    except Exception:
+                        pass
+                services.sort(key=lambda x: (x["active"] != "active", x["desc"].lower()))
+            except Exception:
+                pass
+
+        apps = []
+        if psutil:
+            try:
+                app_map = {}
+                for p in procs:
+                    p_name = p["name"]
+                    p_clean = p_name[:-4] if p_name.lower().endswith(".exe") else p_name
+                    p_clean = p_clean.replace("-", " ").replace("_", " ").title()
+                    if p_name.lower() in ["svchost.exe", "system", "registry", "smss.exe", "csrss.exe", "wininit.exe", "services.exe", "lsass.exe", "fontdrvhost.exe"]:
+                        continue
+                    if p_clean not in app_map:
+                        app_map[p_clean] = {
+                            "name": p_clean,
+                            "package": p_name,
+                            "source": "Windows App",
+                            "exec": p["cmd"],
+                            "icon": "application-x-executable",
+                            "categories": "Utility",
+                            "is_running": True,
+                            "cpu": 0.0,
+                            "mem_mb": 0,
+                            "data_rx_mb": 0.0,
+                            "data_tx_mb": 0.0,
+                            "data_total_mb": 0.0,
+                            "active_screen_sec": 0,
+                            "background_sec": 0,
+                            "battery_percent": 0.0
+                        }
+                    app_map[p_clean]["cpu"] += p["cpu"]
+                    app_map[p_clean]["mem_mb"] += p["mem_mb"]
+                apps = list(app_map.values())
+                apps.sort(key=lambda x: x["mem_mb"], reverse=True)
+            except Exception:
+                pass
+
+        return {
+            "cpu": round(cpu_pct, 1),
+            "cpu_temp": cpu_temp,
+            "load1": round(load1, 2),
+            "load5": round(load5, 2),
+            "load15": round(load15, 2),
+            "mem_used": mem_used,
+            "mem_total": mem_total,
+            "mem_free": mem_free,
+            "mem_cached": mem_cached,
+            "swap_used": swap_used,
+            "swap_total": swap_total,
+            "disks": disks,
+            "gpu": gpu_info,
+            "uptime": uptime_str,
+            "boot_time": boot_time_str,
+            "cpu_model": cpu_model,
+            "cpu_cores": cpu_count,
+            "os_name": os_name_detected,
+            "kernel": kernel_str,
+            "hostname": hostname_str,
+            "net_rx": net_rx,
+            "net_tx": net_tx,
+            "interfaces": interfaces,
+            "processes": procs,
+            "services": services,
+            "apps": apps
+        }
+
 
     try:
         load1, load5, load15 = os.getloadavg()
@@ -673,7 +1100,7 @@ def get_task_manager_stats():
             pass
         seen_units = set()
         for line in (sc_out + "\n" + sc_user).strip().splitlines():
-            clean_line = line.strip().lstrip("●*×+? \t")
+            clean_line = line.strip().lstrip("o*x+? \t")
             parts = clean_line.split(None, 4)
             if len(parts) >= 4:
                 unit = parts[0]
@@ -750,10 +1177,58 @@ def get_task_manager_stats():
 
 def execute_task_manager_action(cmd_str):
     try:
+        parts = cmd_str.strip().split()
+        if not parts:
+            return "Empty command"
+        action = parts[0].lower()
+
+        if os.name == "nt":
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = 0
+            cflags = subprocess.CREATE_NO_WINDOW
+
+            if action in ["kill", "kill_parent", "killparent", "force_kill"]:
+                pids = [int(p) for p in parts[1:] if p.lstrip('-+').isdigit() and not p.startswith('-')]
+                for pid in pids:
+                    try:
+                        if psutil:
+                            psutil.Process(pid).kill()
+                        else:
+                            os.kill(pid, signal.SIGTERM)
+                    except Exception:
+                        pass
+                return f"Process {pids} terminated"
+
+            elif action in ["killall", "kill_app", "terminate", "terminate_app", "pkill"] and len(parts) > 1:
+                target = parts[1].lower()
+                killed = 0
+                if psutil:
+                    for p in psutil.process_iter(['pid', 'name']):
+                        try:
+                            if target in p.info['name'].lower():
+                                p.kill()
+                                killed += 1
+                        except Exception:
+                            pass
+                return f"Terminated {killed} instances of {target}"
+
+            elif action == "launch" and len(parts) > 1:
+                cmd = " ".join(parts[1:])
+                subprocess.Popen(cmd, shell=True, startupinfo=si, creationflags=cflags,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return f"Launched {cmd}"
+
+            else:
+                subprocess.Popen(cmd_str, shell=True, startupinfo=si, creationflags=cflags,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return f"Executed: {cmd_str}"
+
         user_env = os.environ.copy()
+        uid = os.getuid() if hasattr(os, "getuid") else 1000
         if "DISPLAY" not in user_env: user_env["DISPLAY"] = ":0"
         if "WAYLAND_DISPLAY" not in user_env: user_env["WAYLAND_DISPLAY"] = "wayland-0"
-        if "XDG_RUNTIME_DIR" not in user_env: user_env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
+        if "XDG_RUNTIME_DIR" not in user_env: user_env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
 
         parts = cmd_str.strip().split()
         if not parts:
@@ -940,8 +1415,9 @@ def setup_virtual_mic():
     except Exception as e:
         print(f"[!] Virtual Mic setup notice: {e}")
 
-setup_virtual_mic()
 def start_tcp_mic_server(port=59002):
+    if os.name == "nt":
+        return
     def tcp_mic_worker():
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -960,33 +1436,44 @@ def start_tcp_mic_server(port=59002):
                             )
                             while stream_state.running:
                                 data = c.recv(2048)
-                                if not data: break
+                                if not data:
+                                    break
                                 proc.stdin.write(data)
                                 proc.stdin.flush()
                         except Exception:
                             pass
                         finally:
-                            try: proc.terminate()
-                            except Exception: pass
-                            try: c.close()
-                            except Exception: pass
+                            try:
+                                proc.terminate()
+                            except Exception:
+                                pass
+                            try:
+                                c.close()
+                            except Exception:
+                                pass
                     t = threading.Thread(target=handle_mic_conn, args=(conn,), daemon=True)
                     t.start()
                 except Exception:
-                    pass
-        except Exception as e:
-            print(f"[!] TCP Mic Server note: {e}")
+                    time.sleep(1)
+        except Exception:
+            pass
 
-    t = threading.Thread(target=tcp_mic_worker, daemon=True, name="TcpMicServer")
+    t = threading.Thread(target=tcp_mic_worker, daemon=True)
     t.start()
+
+if os.name != "nt":
+    setup_virtual_mic()
 
 
 
 import sqlite3
 
+import tempfile
+DEFAULT_ANALYTICS_DB = os.path.join(tempfile.gettempdir(), "task_manager_analytics.db") if os.name == "nt" else "/dev/shm/task_manager_analytics.db"
+
 class AnalyticsEngine:
-    def __init__(self, db_path="/dev/shm/task_manager_analytics.db"):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        self.db_path = db_path or DEFAULT_ANALYTICS_DB
         self._init_db()
         self.prev_io = {}
         self.proc_stats = {}
@@ -1047,6 +1534,8 @@ class AnalyticsEngine:
             print("[!] Analytics DB init error:", e)
 
     def _sample_live_system_io(self):
+        if os.name == "nt":
+            return
         try:
             now = int(time.time())
             dt = datetime.datetime.fromtimestamp(now)
@@ -1478,11 +1967,12 @@ class StreamState:
             return self.ticket, self.latest_frame
 
 stream_state = StreamState()
-start_tcp_mic_server(59002)
+if os.name != "nt":
+    start_tcp_mic_server(59002)
 
 def get_desktop_env():
     env = os.environ.copy()
-    uid = os.getuid()
+    uid = os.getuid() if hasattr(os, "getuid") else 1000
     runtime_dir = env.get("XDG_RUNTIME_DIR", f"/run/user/{uid}")
     env["XDG_RUNTIME_DIR"] = runtime_dir
     
@@ -1508,6 +1998,17 @@ def get_desktop_env():
     return env
 
 def capture_desktop_screenshot(output_path):
+    if os.name == "nt":
+        try:
+            if 'windows_capture_engine' in globals() and windows_capture_engine:
+                f_data = windows_capture_engine.capture_frame()
+                if f_data:
+                    with open(output_path, "wb") as f:
+                        f.write(f_data)
+                    return True
+        except Exception:
+            pass
+        return False
     env = get_desktop_env()
     try:
         if os.path.exists(output_path):
@@ -1581,6 +2082,17 @@ class AudioBroadcaster:
                     self.proc = None
 
     def _capture_loop(self):
+        if os.name == "nt":
+            silence = b'\x00' * 2048
+            while self.running and self.clients:
+                with self.lock:
+                    for q in list(self.clients):
+                        try:
+                            q.put_nowait(silence)
+                        except queue.Full:
+                            pass
+                time.sleep(0.1)
+            return
         env = get_desktop_env()
         while self.running:
             proc = None
@@ -1887,8 +2399,163 @@ class FastWaylandCaptureEngine:
             else:
                 time.sleep(0.05)
 
-portal_engine = PipeWirePortalEngine()
-fallback_engine = FastWaylandCaptureEngine(portal_engine)
+class WindowsScreenCaptureEngine:
+    def __init__(self):
+        self.running = True
+        self.is_active = True
+        self.is_starting = False
+        self.user32 = ctypes.windll.user32
+        self.gdi32 = ctypes.windll.gdi32
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
+        self.width = self.user32.GetSystemMetrics(0)
+        self.height = self.user32.GetSystemMetrics(1)
+
+        class BITMAPINFOHEADER(ctypes.Structure):
+            _fields_ = [
+                ('biSize', wintypes.DWORD),
+                ('biWidth', wintypes.LONG),
+                ('biHeight', wintypes.LONG),
+                ('biPlanes', wintypes.WORD),
+                ('biBitCount', wintypes.WORD),
+                ('biCompression', wintypes.DWORD),
+                ('biSizeImage', wintypes.DWORD),
+                ('biXPelsPerMeter', wintypes.LONG),
+                ('biYPelsPerMeter', wintypes.LONG),
+                ('biClrUsed', wintypes.DWORD),
+                ('biClrImportant', wintypes.DWORD)
+            ]
+        class BITMAPINFO(ctypes.Structure):
+            _fields_ = [('bmiHeader', BITMAPINFOHEADER), ('bmiColors', wintypes.DWORD * 3)]
+
+        self.bmi = BITMAPINFO()
+        self.bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+        self.bmi.bmiHeader.biWidth = self.width
+        self.bmi.bmiHeader.biHeight = -self.height
+        self.bmi.bmiHeader.biPlanes = 1
+        self.bmi.bmiHeader.biBitCount = 32
+        self.bmi.bmiHeader.biCompression = 0
+
+        self.hdc_screen = self.user32.GetDC(0)
+        self.hdc_mem = self.gdi32.CreateCompatibleDC(self.hdc_screen)
+        self.ppvBits = ctypes.c_void_p()
+        self.hbm = self.gdi32.CreateDIBSection(self.hdc_screen, ctypes.byref(self.bmi), 0, ctypes.byref(self.ppvBits), None, 0)
+        self.gdi32.SelectObject(self.hdc_mem, self.hbm)
+        self.raw_buffer_len = self.width * self.height * 4
+
+        try:
+            self.gdi32.DeleteObject.argtypes = [wintypes.HANDLE]
+        except Exception:
+            pass
+
+        self.thread = threading.Thread(target=self._loop, daemon=True, name="WindowsCaptureThread")
+        self.thread.start()
+
+    def start(self):
+        self.running = True
+        self.is_active = True
+        if not self.thread or not self.thread.is_alive():
+            self.thread = threading.Thread(target=self._loop, daemon=True, name="WindowsCaptureThread")
+            self.thread.start()
+
+    def stop(self):
+        self.is_active = False
+
+    def capture_frame(self):
+        try:
+            w = self.user32.GetSystemMetrics(0)
+            h = self.user32.GetSystemMetrics(1)
+            if w != self.width or h != self.height:
+                self.width = w
+                self.height = h
+                self.bmi.bmiHeader.biWidth = w
+                self.bmi.bmiHeader.biHeight = -h
+                if self.hbm:
+                    try: self.gdi32.DeleteObject(self.hbm)
+                    except Exception: pass
+                self.ppvBits = ctypes.c_void_p()
+                self.hbm = self.gdi32.CreateDIBSection(self.hdc_screen, ctypes.byref(self.bmi), 0, ctypes.byref(self.ppvBits), None, 0)
+                self.gdi32.SelectObject(self.hdc_mem, self.hbm)
+                self.raw_buffer_len = w * h * 4
+
+            self.gdi32.BitBlt(self.hdc_mem, 0, 0, self.width, self.height, self.hdc_screen, 0, 0, 0x40CC0020)
+
+            # Draw cursor onto the captured frame
+            try:
+                class POINT(ctypes.Structure):
+                    _fields_ = [('x', wintypes.LONG), ('y', wintypes.LONG)]
+                class CURSORINFO(ctypes.Structure):
+                    _fields_ = [('cbSize', wintypes.DWORD), ('flags', wintypes.DWORD),
+                                ('hCursor', wintypes.HANDLE), ('ptScreenPos', POINT)]
+                class ICONINFO(ctypes.Structure):
+                    _fields_ = [('fIcon', wintypes.BOOL), ('xHotspot', wintypes.DWORD),
+                                ('yHotspot', wintypes.DWORD), ('hbmMask', wintypes.HANDLE), ('hbmColor', wintypes.HANDLE)]
+
+                hDesk = self.user32.OpenInputDesktop(0, False, 0x01FF)
+                if hDesk:
+                    self.user32.SetThreadDesktop(hDesk)
+
+                ci = CURSORINFO()
+                ci.cbSize = ctypes.sizeof(CURSORINFO)
+                if self.user32.GetCursorInfo(ctypes.byref(ci)) and (ci.flags & 1) and ci.hCursor:
+                    ii = ICONINFO()
+                    cx = ci.ptScreenPos.x
+                    cy = ci.ptScreenPos.y
+                    if self.user32.GetIconInfo(ci.hCursor, ctypes.byref(ii)):
+                        cx -= ii.xHotspot
+                        cy -= ii.yHotspot
+                        if ii.hbmMask:
+                            try: self.gdi32.DeleteObject(ii.hbmMask)
+                            except Exception: pass
+                        if ii.hbmColor:
+                            try: self.gdi32.DeleteObject(ii.hbmColor)
+                            except Exception: pass
+                    self.user32.DrawIconEx(self.hdc_mem, cx, cy, ci.hCursor, 0, 0, 0, None, 0x0003)
+            except Exception:
+                pass
+
+            if cv2 is not None and np is not None:
+                arr = np.ctypeslib.as_array(ctypes.cast(self.ppvBits, ctypes.POINTER(ctypes.c_uint8)), shape=(self.height, self.width, 4))
+                bgr = cv2.cvtColor(arr, cv2.COLOR_BGRA2BGR)
+                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 65, int(cv2.IMWRITE_JPEG_OPTIMIZE), 0]
+                _, enc = cv2.imencode('.jpg', bgr, encode_param)
+                return enc.tobytes()
+
+            img = Image.frombuffer('RGB', (self.width, self.height), ctypes.string_at(self.ppvBits, self.raw_buffer_len), 'raw', 'BGRX', 0, 1)
+            bio = io.BytesIO()
+            img.save(bio, format='JPEG', quality=65)
+            return bio.getvalue()
+        except Exception:
+            return None
+
+    def _loop(self):
+        while self.running and stream_state.running:
+            if stream_state.active_clients > 0:
+                t0 = time.time()
+                frame_data = self.capture_frame()
+                if frame_data and len(frame_data) > 500:
+                    stream_state.push_frame(frame_data)
+                elapsed = time.time() - t0
+                # Target 60fps
+                remaining = 0.016 - elapsed
+                if remaining > 0:
+                    time.sleep(remaining)
+            else:
+                time.sleep(0.05)
+
+if os.name == "nt":
+    windows_capture_engine = WindowsScreenCaptureEngine()
+    portal_engine = windows_capture_engine
+    fallback_engine = windows_capture_engine
+else:
+    windows_capture_engine = None
+    portal_engine = PipeWirePortalEngine()
+    fallback_engine = FastWaylandCaptureEngine(portal_engine)
 
 class SystemLifecycleMonitor:
     def __init__(self, portal_engine):
@@ -1973,6 +2640,8 @@ class SystemLifecycleMonitor:
         return ip != "127.0.0.1" and bool(ip)
 
     def _monitor_loop(self):
+        if os.name == "nt":
+            return
         self._setup_dbus_signals()
         while self.running and stream_state.running:
             time.sleep(2)
@@ -1990,10 +2659,205 @@ class SystemLifecycleMonitor:
 lifecycle_monitor = SystemLifecycleMonitor(portal_engine)
 
 
+
+_cached_win_media = {
+    "players": [],
+    "selected_player": "",
+    "title": "",
+    "artist": "",
+    "album": "",
+    "status": "Stopped",
+    "position": 0,
+    "length": 0,
+    "position_sec": 0,
+    "length_sec": 0,
+    "last_update": 0
+}
+
+def _clean_win_player_name(raw_name):
+    if not raw_name:
+        return ""
+    name = raw_name.replace(".exe", "").strip()
+    name = re.sub(r'([a-z])([A-Z])', r'\1 \2', name)
+    name = os.path.basename(name).replace("-", " ").replace("_", " ").title()
+    return name
+
+def _query_windows_media_info(req_player=""):
+    global _cached_win_media
+    now = time.time()
+    if now - _cached_win_media.get("last_update", 0) < 0.5:
+        return _cached_win_media
+
+    ps_script = """[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[System.Reflection.Assembly]::LoadWithPartialName('System.Runtime.WindowsRuntime') | Out-Null
+$asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.IsGenericMethodDefinition -and $_.GetParameters().Length -eq 1 })[0]
+function Await-Op($op, $type) { $m = $asTaskGeneric.MakeGenericMethod(@($type)); $task = $m.Invoke($null, @($op)); $task.Wait(1200) | Out-Null; return $task.Result }
+[Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media, ContentType = WindowsRuntime] | Out-Null
+[Windows.Media.Control.GlobalSystemMediaTransportControlsSession, Windows.Media, ContentType = WindowsRuntime] | Out-Null
+[Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties, Windows.Media, ContentType = WindowsRuntime] | Out-Null
+$mgr = Await-Op ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
+
+$list = @()
+if ($mgr) {
+  $sessions = $mgr.GetSessions()
+  foreach ($s in $sessions) {
+    $props = Await-Op ($s.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties])
+    $pb = $s.GetPlaybackInfo()
+    $tl = $s.GetTimelineProperties()
+    $app = $s.SourceAppUserModelId
+    $title = if ($props.Title) { $props.Title } else { '' }
+    $artist = if ($props.Artist) { $props.Artist } else { '' }
+    $album = if ($props.AlbumTitle) { $props.AlbumTitle } else { '' }
+    $st = if ($pb.PlaybackStatus) { $pb.PlaybackStatus.ToString() } else { 'Stopped' }
+    $pos = [int64]($tl.Position.TotalSeconds * 1000000)
+    $len = [int64]($tl.EndTime.TotalSeconds * 1000000)
+    $pos_sec = [int]($tl.Position.TotalSeconds)
+    $len_sec = [int]($tl.EndTime.TotalSeconds)
+    $list += @{
+      app = $app
+      title = $title
+      artist = $artist
+      album = $album
+      status = $st
+      position = $pos
+      length = $len
+      position_sec = $pos_sec
+      length_sec = $len_sec
+    }
+  }
+}
+$list | ConvertTo-Json -Compress
+"""
+    sessions = []
+    try:
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0
+        p = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+                           capture_output=True, text=True, encoding="utf-8", timeout=2.0, startupinfo=si,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+        out = p.stdout.strip()
+        if out.startswith("{") or out.startswith("["):
+            data = json.loads(out)
+            if isinstance(data, dict):
+                sessions = [data]
+            elif isinstance(data, list):
+                sessions = data
+    except Exception:
+        pass
+
+    running_media_apps = set()
+    if psutil:
+        try:
+            for p in psutil.process_iter(['name']):
+                pname = p.info['name'].lower()
+                if "spotify" in pname:
+                    running_media_apps.add("Spotify")
+                elif "brave" in pname:
+                    running_media_apps.add("Brave")
+                elif "chrome" in pname:
+                    running_media_apps.add("Chrome")
+                elif "firefox" in pname:
+                    running_media_apps.add("Firefox")
+                elif "vlc" in pname:
+                    running_media_apps.add("VLC")
+                elif "msedge" in pname:
+                    running_media_apps.add("Edge")
+        except Exception:
+            pass
+
+    players_map = {}
+    for sess in sessions:
+        raw_app = sess.get("app", "")
+        clean_name = _clean_win_player_name(raw_app) or "Media Player"
+        players_map[clean_name] = sess
+
+    for r_app in running_media_apps:
+        if r_app not in players_map:
+            players_map[r_app] = {
+                "app": r_app,
+                "title": "",
+                "artist": "",
+                "album": "",
+                "status": "Stopped",
+                "position": 0,
+                "length": 0,
+                "position_sec": 0,
+                "length_sec": 0
+            }
+
+    selected_player = ""
+    selected_sess = None
+
+    if req_player:
+        for k, v in players_map.items():
+            if req_player.lower() in k.lower() or req_player.lower() in v.get("app", "").lower():
+                selected_player = k
+                selected_sess = v
+                break
+
+    if not selected_sess and players_map:
+        for k, v in players_map.items():
+            if v.get("status") == "Playing":
+                selected_player = k
+                selected_sess = v
+                break
+
+    if not selected_sess and players_map:
+        selected_player = list(players_map.keys())[0]
+        selected_sess = players_map[selected_player]
+
+    if not selected_sess:
+        selected_sess = {
+            "title": "",
+            "artist": "",
+            "album": "",
+            "status": "Stopped",
+            "position": 0,
+            "length": 0,
+            "position_sec": 0,
+            "length_sec": 0
+        }
+
+    players_list = list(players_map.keys())
+    if not players_list:
+        players_list = ["Desktop Media"]
+        selected_player = "Desktop Media"
+
+    res = {
+        "players": players_list,
+        "selected_player": selected_player or (players_list[0] if players_list else ""),
+        "title": selected_sess.get("title", ""),
+        "artist": selected_sess.get("artist", ""),
+        "album": selected_sess.get("album", ""),
+        "status": selected_sess.get("status", "Stopped"),
+        "position": selected_sess.get("position", 0),
+        "length": selected_sess.get("length", 0),
+        "position_sec": selected_sess.get("position_sec", 0),
+        "length_sec": selected_sess.get("length_sec", 0),
+        "last_update": time.time()
+    }
+    _cached_win_media = res
+    return res
+
+def _send_windows_media_key(vk):
+    try:
+        user32 = ctypes.windll.user32
+        KEYEVENTF_KEYUP = 0x0002
+        user32.keybd_event(vk, 0, 0, 0)
+        time.sleep(0.02)
+        user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+        return True
+    except Exception:
+        return False
+
 def get_mpris_status(req_player=""):
+    if os.name == "nt":
+        return _query_windows_media_info(req_player)
     env = os.environ.copy()
-    if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
-    if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{os.getuid()}/bus"
+    uid = os.getuid() if hasattr(os, "getuid") else 1000
+    if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
+    if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{uid}/bus"
 
     players = []
     try:
@@ -2103,9 +2967,77 @@ def get_mpris_status(req_player=""):
     return res
 
 def perform_mpris_action(act, req_player="", pos=0):
+    if os.name == "nt":
+        global _cached_win_media
+        _cached_win_media["last_update"] = 0
+
+        target = req_player.strip() if req_player else ""
+        try:
+            ps_action = f"""[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[System.Reflection.Assembly]::LoadWithPartialName('System.Runtime.WindowsRuntime') | Out-Null
+$asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {{ $_.Name -eq 'AsTask' -and $_.IsGenericMethodDefinition -and $_.GetParameters().Length -eq 1 }})[0]
+function Await-Op($op, $type) {{ $m = $asTaskGeneric.MakeGenericMethod(@($type)); $task = $m.Invoke($null, @($op)); $task.Wait(1200) | Out-Null; return $task.Result }}
+[Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media, ContentType = WindowsRuntime] | Out-Null
+$mgr = Await-Op ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
+if ($mgr) {{
+  $sessions = $mgr.GetSessions()
+  $target_sess = $null
+  if ('{target}') {{
+    foreach ($s in $sessions) {{
+      if ($s.SourceAppUserModelId -like '*{target}*') {{
+        $target_sess = $s
+        break
+      }}
+    }}
+  }}
+  if (-not $target_sess) {{
+    $target_sess = $mgr.GetCurrentSession()
+  }}
+  if ($target_sess) {{
+    if ('{act}' -eq 'play_pause') {{
+      Await-Op ($target_sess.TryTogglePlayPauseAsync()) ([bool]) | Out-Null
+    }} elseif ('{act}' -eq 'play') {{
+      Await-Op ($target_sess.TryPlayAsync()) ([bool]) | Out-Null
+    }} elseif ('{act}' -eq 'pause') {{
+      Await-Op ($target_sess.TryPauseAsync()) ([bool]) | Out-Null
+    }} elseif ('{act}' -eq 'next') {{
+      Await-Op ($target_sess.TrySkipNextAsync()) ([bool]) | Out-Null
+    }} elseif ('{act}' -eq 'previous' -or '{act}' -eq 'prev') {{
+      Await-Op ($target_sess.TrySkipPreviousAsync()) ([bool]) | Out-Null
+    }} elseif ('{act}' -eq 'stop') {{
+      Await-Op ($target_sess.TryStopAsync()) ([bool]) | Out-Null
+    }} elseif ('{act}' -eq 'seek') {{
+      $ticks = [int64]({float(pos)} * 10000000)
+      Await-Op ($target_sess.TryChangePlaybackPositionAsync($ticks)) ([bool]) | Out-Null
+    }}
+  }}
+}}
+"""
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = 0
+            subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps_action],
+                           capture_output=True, text=True, timeout=2.0, startupinfo=si,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+            return True
+        except Exception:
+            pass
+
+        if act == "seek":
+            return True
+        if act in ["play_pause", "play", "pause"]:
+            return _send_windows_media_key(0xB3)
+        elif act == "next":
+            return _send_windows_media_key(0xB0)
+        elif act in ["previous", "prev"]:
+            return _send_windows_media_key(0xB1)
+        elif act == "stop":
+            return _send_windows_media_key(0xB2)
+        return False
     env = os.environ.copy()
-    if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
-    if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{os.getuid()}/bus"
+    uid = os.getuid() if hasattr(os, "getuid") else 1000
+    if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
+    if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{uid}/bus"
 
     players = []
     try:
@@ -2178,6 +3110,154 @@ def perform_mpris_action(act, req_player="", pos=0):
                     pass
     return False
 
+class SpeakerAudioBroadcaster:
+    def __init__(self):
+        self.clients = []
+        self.lock = threading.Lock()
+        self.running = True
+        self.thread = None
+
+    def register(self, q):
+        with self.lock:
+            self.clients.append(q)
+            if not self.thread or not self.thread.is_alive():
+                self.thread = threading.Thread(target=self._capture_loop, daemon=True, name="SpeakerAudioThread")
+                self.thread.start()
+
+    def unregister(self, q):
+        with self.lock:
+            if q in self.clients:
+                self.clients.remove(q)
+
+    def _capture_loop(self):
+        while self.running and stream_state.running:
+            with self.lock:
+                if not self.clients:
+                    break
+            if pyaudio:
+                try:
+                    p = pyaudio.PyAudio()
+                    try:
+                        wasapi_info = p.get_host_api_info_by_type(pyaudio.paWASAPI)
+                        default_speakers = p.get_device_info_by_index(wasapi_info['defaultOutputDevice'])
+                        if not default_speakers['isLoopbackDevice']:
+                            for loopback in p.get_loopback_device_info_generator():
+                                if default_speakers['name'] in loopback['name']:
+                                    default_speakers = loopback
+                                    break
+                        stream = p.open(format=pyaudio.paInt16,
+                                        channels=2,
+                                        rate=48000,
+                                        input=True,
+                                        input_device_index=default_speakers['index'],
+                                        frames_per_buffer=1024)
+                        try:
+                            while self.running and stream_state.running:
+                                with self.lock:
+                                    if not self.clients:
+                                        break
+                                data = stream.read(1024, exception_on_overflow=False)
+                                if data:
+                                    with self.lock:
+                                        for q in list(self.clients):
+                                            try:
+                                                if not q.full():
+                                                    q.put_nowait(data)
+                                            except Exception:
+                                                pass
+                        finally:
+                            try:
+                                stream.stop_stream()
+                                stream.close()
+                            except Exception:
+                                pass
+                    finally:
+                        p.terminate()
+                except Exception:
+                    time.sleep(0.05)
+            else:
+                silence = b"\x00" * 4096
+                with self.lock:
+                    for q in list(self.clients):
+                        try:
+                            if not q.full():
+                                q.put_nowait(silence)
+                        except Exception:
+                            pass
+                time.sleep(0.02)
+
+speaker_broadcaster = SpeakerAudioBroadcaster()
+
+class LaptopMicBroadcaster:
+    def __init__(self):
+        self.clients = []
+        self.lock = threading.Lock()
+        self.running = True
+        self.thread = None
+
+    def register(self, q):
+        with self.lock:
+            self.clients.append(q)
+            if not self.thread or not self.thread.is_alive():
+                self.thread = threading.Thread(target=self._capture_loop, daemon=True, name="LaptopMicThread")
+                self.thread.start()
+
+    def unregister(self, q):
+        with self.lock:
+            if q in self.clients:
+                self.clients.remove(q)
+
+    def _capture_loop(self):
+        while self.running and stream_state.running:
+            with self.lock:
+                if not self.clients:
+                    break
+            if pyaudio:
+                try:
+                    p = pyaudio.PyAudio()
+                    try:
+                        stream = p.open(format=pyaudio.paInt16,
+                                        channels=2,
+                                        rate=44100,
+                                        input=True,
+                                        frames_per_buffer=1024)
+                        try:
+                            while self.running and stream_state.running:
+                                with self.lock:
+                                    if not self.clients:
+                                        break
+                                data = stream.read(1024, exception_on_overflow=False)
+                                if data:
+                                    with self.lock:
+                                        for q in list(self.clients):
+                                            try:
+                                                if not q.full():
+                                                    q.put_nowait(data)
+                                            except Exception:
+                                                pass
+                        finally:
+                            try:
+                                stream.stop_stream()
+                                stream.close()
+                            except Exception:
+                                pass
+                    finally:
+                        p.terminate()
+                except Exception:
+                    time.sleep(0.05)
+            else:
+                silence = b"\x00" * 4096
+                with self.lock:
+                    for q in list(self.clients):
+                        try:
+                            if not q.full():
+                                q.put_nowait(silence)
+                        except Exception:
+                            pass
+                time.sleep(0.02)
+
+laptop_mic_broadcaster = LaptopMicBroadcaster()
+
 class StreamHandler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         parsed_url = urlparse(self.path)
@@ -2194,7 +3274,7 @@ class StreamHandler(BaseHTTPRequestHandler):
                 self.end_headers()
         elif path in ['/audio.pcm', '/audio.wav', '/audio.mp3', '/audio']:
             self.send_response(200)
-            self.send_header('Content-Type', 'audio/l16; rate=44100; channels=2')
+            self.send_header('Content-Type', 'audio/l16; rate=48000; channels=2')
             self.end_headers()
         else:
             self.send_response(200)
@@ -2209,7 +3289,12 @@ class StreamHandler(BaseHTTPRequestHandler):
             try:
                 content_len = int(self.headers.get("Content-Length", 0))
                 filename = self.headers.get("X-Filename", f"kdeconnect_recording_{int(time.time())}.mp4")
-                video_dir = Path.home() / "Videos" / "Kdeconnect"
+                cfg = get_streamer_config()
+                custom_dir = self.headers.get("X-Custom-Path")
+                if custom_dir and os.path.exists(custom_dir):
+                    video_dir = Path(custom_dir)
+                else:
+                    video_dir = Path(cfg.get("recording_dir", Path.home() / "Videos" / "KDEConnect"))
                 video_dir.mkdir(parents=True, exist_ok=True)
                 dest = video_dir / os.path.basename(filename)
                 with open(dest, "wb") as f:
@@ -2232,29 +3317,8 @@ class StreamHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
 
-        elif path in ['/audio.pcm', '/audio.wav', '/audio.mp3', '/audio']:
-            self.send_response(200)
-            self.send_header('Content-Type', 'audio/l16; rate=44100; channels=2')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
-            self.end_headers()
-
-            q = queue.Queue(maxsize=100)
-            speaker_broadcaster.register(q)
-            try:
-                while stream_state.running:
-                    try:
-                        chunk = q.get(timeout=0.5)
-                        self.wfile.write(chunk)
-                    except queue.Empty:
-                        continue
-            except (BrokenPipeError, ConnectionResetError):
-                pass
-            finally:
-                speaker_broadcaster.unregister(q)
-
         elif path in ["/capture_screenshot", "/screenshot.png", "/screenshot"]:
-            ss_path = "/tmp/kdeconnect_screenshot.png"
+            ss_path = os.path.join(tempfile.gettempdir(), "kdeconnect_screenshot.png")
             success = capture_desktop_screenshot(ss_path)
             if success and os.path.exists(ss_path) and os.path.getsize(ss_path) > 0:
                 with open(ss_path, "rb") as f:
@@ -2372,6 +3436,55 @@ class StreamHandler(BaseHTTPRequestHandler):
                         play_proc.terminate()
                     except Exception:
                         pass
+
+        elif path in ["/storage_location", "/set_storage_location", "/settings", "/set_settings"]:
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8", errors="replace") if length > 0 else "{}"
+            try:
+                data = json.loads(body)
+                cfg = get_streamer_config()
+                if "recording_dir" in data:
+                    cfg["recording_dir"] = data["recording_dir"]
+                    Path(cfg["recording_dir"]).mkdir(parents=True, exist_ok=True)
+                    save_streamer_config(cfg)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": True, "config": cfg}).encode("utf-8"))
+            except Exception as e:
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode("utf-8"))
+
+        elif path == "/terminal_input":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8", errors="replace") if length > 0 else ""
+            if not global_pty.is_alive():
+                shell = "powershell.exe -NoLogo -NoExit" if os.name == "nt" else "bash"
+                global_pty.start(shell)
+            ok = global_pty.write_input(body)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"success": ok}).encode("utf-8"))
+
+        elif path == "/terminal_signal":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8", errors="replace") if length > 0 else ""
+            sig = body.strip().lower()
+            if "ctrl+c" in sig or "sigint" in sig:
+                global_pty.write_input("\x03")
+            elif "ctrl+z" in sig or "sigtstp" in sig:
+                global_pty.write_input("\x1a")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(b'{"success": true}')
         else:
             self.send_response(404)
             self.end_headers()
@@ -2526,7 +3639,7 @@ class StreamHandler(BaseHTTPRequestHandler):
                 stream_state.active_clients = max(0, stream_state.active_clients - 1)
 
         elif path in ["/capture_screenshot", "/screenshot.png", "/screenshot"]:
-            ss_path = "/tmp/kdeconnect_screenshot.png"
+            ss_path = "/tmp/kdeconnect_screenshot.png" if os.name != "nt" else os.path.join(tempfile.gettempdir(), "kdeconnect_screenshot.png")
             success = capture_desktop_screenshot(ss_path)
             if success and os.path.exists(ss_path) and os.path.getsize(ss_path) > 0:
                 with open(ss_path, "rb") as f:
@@ -2631,13 +3744,57 @@ class StreamHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(resp)
 
+        elif path in ['/audio.pcm', '/audio.wav', '/audio.mp3', '/audio']:
+            self.send_response(200)
+            self.send_header('Content-Type', 'audio/l16; rate=48000; channels=2')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            self.end_headers()
+
+            q = queue.Queue(maxsize=100)
+            speaker_broadcaster.register(q)
+            try:
+                while stream_state.running:
+                    try:
+                        chunk = q.get(timeout=0.5)
+                        self.wfile.write(chunk)
+                    except queue.Empty:
+                        continue
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            finally:
+                speaker_broadcaster.unregister(q)
+
+        elif path in ['/laptop_mic.pcm', '/laptop_mic']:
+            self.send_response(200)
+            self.send_header('Content-Type', 'audio/l16; rate=44100; channels=2')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            self.end_headers()
+
+            q = queue.Queue(maxsize=100)
+            laptop_mic_broadcaster.register(q)
+            try:
+                while stream_state.running:
+                    try:
+                        chunk = q.get(timeout=0.5)
+                        self.wfile.write(chunk)
+                    except queue.Empty:
+                        continue
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            finally:
+                laptop_mic_broadcaster.unregister(q)
+
         elif path == "/terminal_poll":
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-            out = global_pty.read_output()
-            self.wfile.write(out.encode("utf-8"))
+            # Do NOT auto-restart here - only return buffered output
+            # Terminal is started lazily on first /terminal_input
+            out = global_pty.read_output() if global_pty.is_alive() else ""
+            self.wfile.write(out.encode("utf-8", errors="replace"))
 
         
         elif path == "/token_usage":
@@ -2674,7 +3831,7 @@ h1 { font-size: 20px; color: #38bdf8; margin-top: 0; display: flex; align-items:
 </head>
 <body>
 <div class="card">
-  <h1>⚡ Antigravity Token Counter <span class="badge">LIVE</span></h1>
+  <h1>Antigravity Token Counter <span class="badge">LIVE</span></h1>
   <div class="big-stat" id="total-tokens">Loading...</div>
   <div class="sub-stat" id="total-details">Connecting...</div>
   <div class="stat-row"><span>User Prompts:</span><span class="stat-val" id="user-tok">-</span></div>
@@ -2691,7 +3848,7 @@ async function update() {
     const data = await res.json();
     if (data.total_tokens !== undefined) {
       document.getElementById("total-tokens").innerText = data.total_tokens.toLocaleString() + " tokens";
-      document.getElementById("total-details").innerText = (data.total_tokens / 1000000).toFixed(2) + "M tokens • " + (data.total_chars / (1024*1024)).toFixed(2) + " MB text";
+      document.getElementById("total-details").innerText = (data.total_tokens / 1000000).toFixed(2) + "M tokens - " + (data.total_chars / (1024*1024)).toFixed(2) + " MB text";
       document.getElementById("user-tok").innerText = data.user_tokens.toLocaleString();
       document.getElementById("asst-tok").innerText = data.assistant_tokens.toLocaleString();
       document.getElementById("tool-tok").innerText = data.tool_tokens.toLocaleString();
@@ -2721,13 +3878,26 @@ update();
             analytics_data = analytics_engine.query_analytics(metric, category, timeframe, start_date, end_date)
             self.wfile.write(json.dumps(analytics_data).encode("utf-8"))
 
-        elif path == "/task_manager_stats":
+        elif path in ["/storage_location", "/get_storage_location", "/settings", "/get_settings"]:
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
+            cfg = get_streamer_config()
+            self.wfile.write(json.dumps(cfg).encode("utf-8"))
+
+        elif path == "/task_manager_stats":
             stats_data = get_task_manager_stats()
-            self.wfile.write(json.dumps(stats_data).encode("utf-8"))
+            body = json.dumps(stats_data).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except Exception:
+                pass
 
         elif path in ["/task_manager_action", "/action"]:
             cmd = query_params.get("cmd", [""])[0]

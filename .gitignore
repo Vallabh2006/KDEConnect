@@ -74,3 +74,14 @@ __pycache__/
 # IDE & OS
 .idea/
 .gradle/
+
+# Installer, dist, and large binaries
+dist/
+installer/downloads/
+installer/build_pyinstaller/
+installer/obj/
+installer/tools/_internal/
+installer/tools/build/
+installer/tools/kdeconnect-streamer.exe
+share/
+bin/

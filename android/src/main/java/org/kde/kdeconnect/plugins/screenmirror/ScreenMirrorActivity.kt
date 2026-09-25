@@ -2306,7 +2306,7 @@ class ScreenMirrorActivity : BaseActivity<ActivityScreenMirrorBinding>(),
                         }
                         if (conn.responseCode == 200) {
                             runOnUiThread {
-                                Toast.makeText(this@ScreenMirrorActivity, "Copy saved to ~/Videos/Kdeconnect on PC", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(this@ScreenMirrorActivity, "Copy saved to Videos/KDEConnect on PC", Toast.LENGTH_SHORT).show()
                             }
                         }
                     } catch (_: Exception) {}

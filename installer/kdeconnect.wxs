@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+     xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+
+  <!-- ===================================================================== -->
+  <!-- Product & Package Definition                                          -->
+  <!-- ===================================================================== -->
+  <Product Id="*"
+           Name="KDE Connect"
+           Language="1033"
+           Version="24.0.0"
+           Manufacturer="KDE Community"
+           UpgradeCode="D814AC22-86DE-494B-96DE-9A6836F85E0E">
+
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perMachine"
+             InstallPrivileges="elevated"
+             Platform="x64"
+             Description="KDE Connect for Windows Installer"
+             Comments="Seamless multi-device integration for Windows" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed."
+                  AllowSameVersionUpgrades="yes" />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Application Icons -->
+    <Icon Id="KdeConnectIco" SourceFile="$(var.SourceDir)\bin\kdeconnect-app.exe" />
+    <Property Id="ARPPRODUCTICON" Value="KdeConnectIco" />
+    <Property Id="ARPHELPLINK" Value="https://kdeconnect.kde.org/" />
+    <Property Id="ARPURLINFOABOUT" Value="https://kdeconnect.kde.org/" />
+
+    <!-- ===================================================================== -->
+    <!-- Directory Structure                                                   -->
+    <!-- ===================================================================== -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <!-- 64-bit Program Files -->
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="KDE Connect">
+          <Directory Id="BinFolder" Name="bin" />
+          <Directory Id="LibFolder" Name="lib" />
+          <Directory Id="ShareFolder" Name="share" />
+          <Directory Id="QmlFolder" Name="qml" />
+        </Directory>
+      </Directory>
+
+      <!-- Start Menu Programs -->
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="KDE Connect" />
+      </Directory>
+
+      <!-- Desktop Folder -->
+      <Directory Id="DesktopFolder" Name="Desktop" />
+    </Directory>
+
+    <!-- ===================================================================== -->
+    <!-- Shortcuts and Registrations                                           -->
+    <!-- ===================================================================== -->
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="ApplicationShortcuts" Guid="A73D0102-1234-4C5A-9E8F-8F4A61E395A1" Win64="yes">
+        <!-- Start Menu Application Shortcut -->
+        <Shortcut Id="ApplicationStartMenuShortcut"
+                  Name="KDE Connect"
+                  Description="KDE Connect for Windows"
+                  Target="[INSTALLFOLDER]bin\kdeconnect-app.exe"
+                  WorkingDirectory="BinFolder"
+                  Icon="KdeConnectIco" />
+
+        <!-- Start Menu Settings Shortcut -->
+        <Shortcut Id="SettingsStartMenuShortcut"
+                  Name="KDE Connect Settings"
+                  Description="Configure KDE Connect"
+                  Target="[INSTALLFOLDER]bin\kdeconnect-settings.exe"
+                  WorkingDirectory="BinFolder" />
+
+        <!-- Start Menu Indicator Shortcut -->
+        <Shortcut Id="IndicatorStartMenuShortcut"
+                  Name="KDE Connect Indicator"
+                  Description="KDE Connect System Tray Indicator"
+                  Target="[INSTALLFOLDER]bin\kdeconnect-indicator.exe"
+                  WorkingDirectory="BinFolder" />
+
+        <!-- Uninstall Shortcut -->
+        <Shortcut Id="UninstallProduct"
+                  Name="Uninstall KDE Connect"
+                  Description="Uninstalls KDE Connect"
+                  Target="[SystemFolder]msiexec.exe"
+                  Arguments="/x [ProductCode]" />
+
+        <RemoveFolder Id="CleanUpShortcuts" On="uninstall" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\KDE Connect"
+                       Name="ShortcutsInstalled"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Desktop Shortcut Component -->
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="DesktopShortcutComponent" Guid="B84E0203-5678-4D6B-AF9A-9E5B72F406B2" Win64="yes">
+        <Shortcut Id="AppDesktopShortcut"
+                  Name="KDE Connect"
+                  Description="KDE Connect for Windows"
+                  Target="[INSTALLFOLDER]bin\kdeconnect-app.exe"
+                  WorkingDirectory="BinFolder"
+                  Icon="KdeConnectIco" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\KDE Connect"
+                       Name="DesktopShortcutInstalled"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Autostart Indicator at Login -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="AutostartRegistration" Guid="C95F0304-9ABC-4E7C-B0AB-AF6C830517C3" Win64="yes">
+        <RegistryValue Root="HKLM"
+                       Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+                       Name="KDEConnectIndicator"
+                       Value="&quot;[INSTALLFOLDER]bin\kdeconnect-indicator.exe&quot;"
+                       Type="string"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- ===================================================================== -->
+    <!-- Custom Actions: Firewall Configuration (1714-1764 TCP/UDP)             -->
+    <!-- ===================================================================== -->
+    <CustomAction Id="AddFirewallRulesTCP"
+                  Directory="TARGETDIR"
+                  Execute="deferred"
+                  Impersonate="no"
+                  ExeCommand="&quot;[SystemFolder]netsh.exe&quot; advfirewall firewall add rule name=&quot;KDE Connect Daemon (TCP-In)&quot; dir=in action=allow protocol=TCP localport=1714-1764 profile=any"
+                  Return="ignore" />
+
+    <CustomAction Id="AddFirewallRulesUDP"
+                  Directory="TARGETDIR"
+                  Execute="deferred"
+                  Impersonate="no"
+                  ExeCommand="&quot;[SystemFolder]netsh.exe&quot; advfirewall firewall add rule name=&quot;KDE Connect Daemon (UDP-In)&quot; dir=in action=allow protocol=UDP localport=1714-1764 profile=any"
+                  Return="ignore" />
+
+    <CustomAction Id="RemoveFirewallRulesTCP"
+                  Directory="TARGETDIR"
+                  Execute="deferred"
+                  Impersonate="no"
+                  ExeCommand="&quot;[SystemFolder]netsh.exe&quot; advfirewall firewall delete rule name=&quot;KDE Connect Daemon (TCP-In)&quot;"
+                  Return="ignore" />
+
+    <CustomAction Id="RemoveFirewallRulesUDP"
+                  Directory="TARGETDIR"
+                  Execute="deferred"
+                  Impersonate="no"
+                  ExeCommand="&quot;[SystemFolder]netsh.exe&quot; advfirewall firewall delete rule name=&quot;KDE Connect Daemon (UDP-In)&quot;"
+                  Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="AddFirewallRulesTCP" After="InstallFiles">NOT Installed</Custom>
+      <Custom Action="AddFirewallRulesUDP" After="AddFirewallRulesTCP">NOT Installed</Custom>
+      <Custom Action="RemoveFirewallRulesTCP" Before="RemoveFiles">Installed AND (REMOVE="ALL")</Custom>
+      <Custom Action="RemoveFirewallRulesUDP" After="RemoveFirewallRulesTCP">Installed AND (REMOVE="ALL")</Custom>
+    </InstallExecuteSequence>
+
+    <!-- ===================================================================== -->
+    <!-- GUI Wizard Configuration (Next -> Next -> Finish)                      -->
+    <!-- ===================================================================== -->
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <UIRef Id="WixUI_InstallDir" />
+    <UIRef Id="WixUI_ErrorProgressText" />
+
+    <!-- Feature Tree -->
+    <Feature Id="MainApplication"
+             Title="KDE Connect Core"
+             Description="Installs KDE Connect core application, daemon, plugins, and libraries."
+             Level="1"
+             AllowAdvertise="no"
+             Absent="disallow">
+      <ComponentGroupRef Id="AppFilesGroup" />
+      <ComponentRef Id="ApplicationShortcuts" />
+      <ComponentRef Id="DesktopShortcutComponent" />
+      <ComponentRef Id="AutostartRegistration" />
+    </Feature>
+
+  </Product>
+</Wix>

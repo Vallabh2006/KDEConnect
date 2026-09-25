@@ -208,10 +208,69 @@ class FloatingButtonService : Service() {
         super.onDestroy()
     }
 
+    
+    data class InsetsRect(val left: Int, val top: Int, val right: Int, val bottom: Int)
+
+    private fun getSystemInsets(): InsetsRect {
+        var left = 0
+        var right = 0
+        var top = 0
+        var bottom = 0
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val insets = windowManager.currentWindowMetrics.windowInsets.getInsetsIgnoringVisibility(
+                    android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.displayCutout()
+                )
+                left = insets.left
+                right = insets.right
+                top = insets.top
+                bottom = insets.bottom
+            } catch (_: Exception) {}
+        } else {
+            val res = resources
+            val isLandscape = res.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+            val navBarId = res.getIdentifier("navigation_bar_height", "dimen", "android")
+            val navBarHeight = if (navBarId > 0) res.getDimensionPixelSize(navBarId) else 0
+            if (isLandscape) {
+                val navBarWidthId = res.getIdentifier("navigation_bar_width", "dimen", "android")
+                val navBarWidth = if (navBarWidthId > 0) res.getDimensionPixelSize(navBarWidthId) else navBarHeight
+                right = navBarWidth
+            } else {
+                bottom = navBarHeight
+            }
+            val statusBarId = res.getIdentifier("status_bar_height", "dimen", "android")
+            top = if (statusBarId > 0) res.getDimensionPixelSize(statusBarId) else 0
+        }
+        return InsetsRect(left, top, right, bottom)
+    }
+
+    private fun updateBubbleVisualState() {
+        val device = getActiveDevice()
+        val isConnected = device != null && device.isReachable
+        val card = bubbleView?.findViewById<MaterialCardView>(R.id.floating_bubble_card)
+        val icon = bubbleView?.findViewById<ImageView>(R.id.floating_bubble_icon)
+
+        if (isConnected) {
+            card?.strokeColor = Color.parseColor("#8038bdf8")
+            if (!isIdle) {
+                card?.alpha = 1.0f
+            }
+            icon?.clearColorFilter()
+        } else {
+            card?.strokeColor = Color.parseColor("#64748b")
+            if (!isIdle) {
+                card?.alpha = 0.65f
+            }
+            val matrix = android.graphics.ColorMatrix().apply { setSaturation(0f) }
+            icon?.colorFilter = android.graphics.ColorMatrixColorFilter(matrix)
+        }
+    }
+
     private val clipboardPollRunnable = object : Runnable {
         override fun run() {
             try {
                 ClipboardListener.instance(applicationContext).refreshFromSystem()
+                updateBubbleVisualState()
             } catch (ignored: Exception) {}
             if (isRunning) {
                 mainHandler.postDelayed(this, 2000)
@@ -222,7 +281,14 @@ class FloatingButtonService : Service() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         updateScreenDimensions()
+        val insets = getSystemInsets()
+        val density = resources.displayMetrics.density
+        val windowSize = (96 * density).toInt()
+        val minY = insets.top
+        val maxY = (screenHeight - insets.bottom - windowSize).coerceAtLeast(minY)
+        bubbleParams.y = bubbleParams.y.coerceIn(minY, maxY)
         snapBubbleToEdge()
+        updateBubbleVisualState()
         if (isMenuShowing) {
             hideMenu()
         }
@@ -371,8 +437,14 @@ class FloatingButtonService : Service() {
                         }
 
                         if (isDragging) {
-                            bubbleParams.x = initialX + dx
-                            bubbleParams.y = initialY + dy
+                            val insets = getSystemInsets()
+                            val minDragX = insets.left - (20 * density).toInt()
+                            val maxDragX = screenWidth - insets.right - windowSize + (20 * density).toInt()
+                            val minDragY = insets.top - (10 * density).toInt()
+                            val maxDragY = (screenHeight - insets.bottom - windowSize + (10 * density).toInt()).coerceAtLeast(minDragY)
+
+                            bubbleParams.x = (initialX + dx).coerceIn(minDragX, maxDragX)
+                            bubbleParams.y = (initialY + dy).coerceIn(minDragY, maxDragY)
                             try {
                                 windowManager.updateViewLayout(bubbleView, bubbleParams)
                             } catch (ignored: Exception) {
@@ -503,11 +575,20 @@ class FloatingButtonService : Service() {
     private fun snapBubbleToEdge() {
         val density = resources.displayMetrics.density
         val windowSize = (96 * density).toInt()
+        val insets = getSystemInsets()
+
+        val minX = insets.left - (12 * density).toInt()
+        val maxX = screenWidth - insets.right - windowSize + (12 * density).toInt()
+
         val targetX = if (bubbleParams.x + windowSize / 2 < screenWidth / 2) {
-            -(12 * density).toInt()
+            minX
         } else {
-            screenWidth - windowSize + (12 * density).toInt()
+            maxX
         }
+
+        val minY = insets.top
+        val maxY = (screenHeight - insets.bottom - windowSize).coerceAtLeast(minY)
+        bubbleParams.y = bubbleParams.y.coerceIn(minY, maxY)
 
         val startX = bubbleParams.x
         val animator = ValueAnimator.ofInt(startX, targetX)
@@ -633,6 +714,8 @@ class FloatingButtonService : Service() {
         val themedContext = ContextThemeWrapper(this, R.style.KdeConnectTheme)
         val inflater = LayoutInflater.from(themedContext)
 
+        val isDeviceReachable = device != null && device.isReachable
+
         for (action in enabledActions) {
             val itemView = inflater.inflate(R.layout.item_floating_action_vertical, column, false)
             val cardView = itemView.findViewById<MaterialCardView>(R.id.action_icon_card)
@@ -640,18 +723,36 @@ class FloatingButtonService : Service() {
 
             iconView.setImageResource(action.iconRes)
 
-            if (action.id == FloatingActionItem.ACTION_PHONE_MIC && isPhoneMicStreaming) {
-                cardView.setCardBackgroundColor(Color.parseColor("#EF4444")) // Glowing red when mic active
-            } else {
-                try {
-                    cardView.setCardBackgroundColor(Color.parseColor(action.colorHex))
-                } catch (ignored: Exception) {
-                }
-            }
+            if (!isDeviceReachable) {
+                cardView.setCardBackgroundColor(Color.parseColor("#334155"))
+                cardView.strokeColor = Color.parseColor("#475569")
+                cardView.strokeWidth = (1 * density).toInt()
+                cardView.alpha = 0.6f
+                val matrix = android.graphics.ColorMatrix().apply { setSaturation(0f) }
+                iconView.colorFilter = android.graphics.ColorMatrixColorFilter(matrix)
 
-            itemView.setOnClickListener {
-                hideMenu()
-                performAction(action.id, device)
+                itemView.setOnClickListener {
+                    hideMenu()
+                    Toast.makeText(this@FloatingButtonService, "Device is disconnected or unreachable", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                cardView.strokeWidth = 0
+                cardView.alpha = 1.0f
+                iconView.clearColorFilter()
+
+                if (action.id == FloatingActionItem.ACTION_PHONE_MIC && isPhoneMicStreaming) {
+                    cardView.setCardBackgroundColor(Color.parseColor("#EF4444"))
+                } else {
+                    try {
+                        cardView.setCardBackgroundColor(Color.parseColor(action.colorHex))
+                    } catch (ignored: Exception) {
+                    }
+                }
+
+                itemView.setOnClickListener {
+                    hideMenu()
+                    performAction(action.id, device)
+                }
             }
 
             column.addView(itemView)
@@ -1240,11 +1341,18 @@ class FloatingButtonService : Service() {
             artistText?.text = if (sub.isNotEmpty()) sub else (if (status.isNotEmpty()) status else "Ready")
 
             if (!isMediaSeeking) {
-                seekbarMedia?.max = if (lenSec > 0) lenSec.toInt() else 100
-                seekbarMedia?.progress = posSec.toInt()
-                posText?.text = formatTime(posSec)
+                if (lenSec > 0) {
+                    seekbarMedia?.max = lenSec.toInt()
+                    seekbarMedia?.progress = posSec.toInt()
+                    posText?.text = formatTime(posSec)
+                    durText?.text = formatTime(lenSec)
+                } else {
+                    seekbarMedia?.max = 100
+                    seekbarMedia?.progress = if (posSec > 0) (posSec % 100).toInt() else 0
+                    posText?.text = if (posSec > 0) formatTime(posSec) else "--:--"
+                    durText?.text = "--:--"
+                }
             }
-            durText?.text = formatTime(lenSec)
 
             btnPlayPause?.setImageResource(if (isCurrentlyPlaying) R.drawable.ic_pause_white else R.drawable.ic_play_white)
 

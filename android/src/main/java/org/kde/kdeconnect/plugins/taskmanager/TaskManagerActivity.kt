@@ -58,8 +58,14 @@ class TaskManagerActivity : AppCompatActivity() {
 
         deviceId = intent.getStringExtra("deviceId") ?: ""
         if (deviceId.isEmpty()) {
-            finish()
-            return
+            val firstReachable = KdeConnect.getInstance().devices.values.firstOrNull { it.isReachable }?.deviceId
+                ?: KdeConnect.getInstance().devices.values.firstOrNull()?.deviceId
+            if (!firstReachable.isNullOrEmpty()) {
+                deviceId = firstReachable
+            } else {
+                finish()
+                return
+            }
         }
 
         val device = KdeConnect.getInstance().getDevice(deviceId)

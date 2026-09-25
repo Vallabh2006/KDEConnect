@@ -111,15 +111,6 @@ class TerminalActivity : AppCompatActivity(), TerminalPlugin.TerminalOutputListe
             return
         }
 
-        val creds = SshManager.getSavedCredentials(this, deviceId)
-        val user = creds?.user ?: "user"
-        val host = if (deviceName.isNotEmpty() && deviceName != "Computer") deviceName else (KdeConnect.getInstance().getDevice(deviceId)?.name ?: "host")
-        val prompt = "[$user@$host ~]$ $cmd\n"
-
-        if (terminalOutputText.isNotEmpty() && !terminalOutputText.endsWith("\n")) {
-            terminalOutputText += "\n"
-        }
-        terminalOutputText += prompt
         plugin?.sendCommand(cmd)
     }
 

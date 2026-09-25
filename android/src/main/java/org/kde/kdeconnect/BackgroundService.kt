@@ -137,6 +137,53 @@ class BackgroundService : Service() {
             linkProvider.onStart()
         }
         initialized = true
+        setupBackgroundOverlayClipboardWatcher()
+    }
+
+    private var dummyOverlayView: android.view.View? = null
+    private val clipboardHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val clipboardPollRunnable = object : Runnable {
+        override fun run() {
+            try {
+                org.kde.kdeconnect.plugins.clipboard.ClipboardListener.instance(applicationContext).refreshFromSystem()
+            } catch (_: Exception) {}
+            clipboardHandler.postDelayed(this, 2000)
+        }
+    }
+
+    private fun setupBackgroundOverlayClipboardWatcher() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && android.provider.Settings.canDrawOverlays(this)) {
+            try {
+                if (dummyOverlayView == null) {
+                    val wm = getSystemService(android.view.WindowManager::class.java)
+                    val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                    } else {
+                        @Suppress("DEPRECATION")
+                        android.view.WindowManager.LayoutParams.TYPE_PHONE
+                    }
+                    val params = android.view.WindowManager.LayoutParams(
+                        1, 1,
+                        overlayType,
+                        android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                                android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                                android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                        android.graphics.PixelFormat.TRANSLUCENT
+                    ).apply {
+                        gravity = android.view.Gravity.TOP or android.view.Gravity.START
+                        x = 0
+                        y = 0
+                    }
+                    val view = android.view.View(this)
+                    wm?.addView(view, params)
+                    dummyOverlayView = view
+                }
+            } catch (e: Exception) {
+                Log.d("BackgroundService", "Overlay dummy view init: ${e.message}")
+            }
+        }
+        clipboardHandler.removeCallbacks(clipboardPollRunnable)
+        clipboardHandler.post(clipboardPollRunnable)
     }
 
     fun changePersistentNotificationVisibility(visible: Boolean) {
@@ -225,6 +272,14 @@ class BackgroundService : Service() {
     override fun onDestroy() {
         Log.d("KdeConnect/BgService", "onDestroy")
         initialized = false
+        clipboardHandler.removeCallbacks(clipboardPollRunnable)
+        dummyOverlayView?.let {
+            try {
+                val wm = getSystemService(android.view.WindowManager::class.java)
+                wm?.removeView(it)
+            } catch (_: Exception) {}
+            dummyOverlayView = null
+        }
         for (linkProvider in linkProviders) {
             linkProvider.onStop()
         }

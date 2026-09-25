@@ -103,6 +103,7 @@ class FloatingButtonService : Service() {
     private var menuOverlayView: View? = null
     private var mouseOverlayView: View? = null
     private var mediaOverlayView: View? = null
+    private var mediaUpdateRunnable: Runnable? = null
     private var clipboardOverlayView: View? = null
 
     private lateinit var clipboardOverlayParams: WindowManager.LayoutParams
@@ -680,12 +681,13 @@ class FloatingButtonService : Service() {
             FloatingActionItem.ACTION_TAKE_SEND_SS -> {
                 Thread {
                     var savedSuccess = false
+                    var fallbackExecuted = false
                     try {
                         val url = URL("http://$host:59001/capture_screenshot")
                         val conn = (url.openConnection() as HttpURLConnection).apply {
                             requestMethod = "GET"
                             connectTimeout = 4000
-                            readTimeout = 6000
+                            readTimeout = 8000
                         }
                         if (conn.responseCode == 200) {
                             val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
@@ -720,11 +722,31 @@ class FloatingButtonService : Service() {
                         Log.e(TAG, "Failed to download screenshot", e)
                     }
 
+                    if (!savedSuccess) {
+                        try {
+                            val cmd = "bash -c 'mkdir -p ~/Pictures/Screenshots; T=~/Pictures/Screenshots/Screenshot_\$(date +%Y%m%d_%H%M%S).png; (spectacle -b -n -o \$T 2>/dev/null || grim \$T 2>/dev/null || import -window root \$T 2>/dev/null); DEV=\$(kdeconnect-cli -a --id-only 2>/dev/null | head -n1); [ -n \"\$DEV\" ] && kdeconnect-cli -d \"\$DEV\" --share \$T 2>/dev/null'"
+                            val enc = URLEncoder.encode(cmd, "UTF-8")
+                            val url = URL("http://$host:59001/task_manager_action?cmd=$enc")
+                            val conn = url.openConnection() as HttpURLConnection
+                            conn.requestMethod = "GET"
+                            conn.connectTimeout = 3000
+                            conn.readTimeout = 3000
+                            if (conn.responseCode == 200) {
+                                fallbackExecuted = true
+                            }
+                            conn.disconnect()
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Fallback screenshot command error", e)
+                        }
+                    }
+
                     mainHandler.post {
                         if (savedSuccess) {
                             Toast.makeText(this@FloatingButtonService, "PC Screenshot saved to phone gallery", Toast.LENGTH_SHORT).show()
-                        } else {
+                        } else if (fallbackExecuted) {
                             Toast.makeText(this@FloatingButtonService, "Screenshot captured on PC", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(this@FloatingButtonService, "Failed to capture PC screenshot", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }.start()
@@ -1160,11 +1182,20 @@ class FloatingButtonService : Service() {
         val host = getActiveDeviceHost(activeDev)
         val sysVolPlugin = activeDev?.getPlugin(SystemVolumePlugin::class.java)
 
+        var currentPosSec = 0L
+        var maxDurationSec = 0L
+        var isCurrentlyPlaying = false
+
         fun formatTime(sec: Long): String {
             val s = sec.coerceAtLeast(0)
-            val m = s / 60
+            val h = s / 3600
+            val m = (s % 3600) / 60
             val remS = s % 60
-            return "%d:%02d".format(m, remS)
+            return if (h > 0) {
+                "%d:%02d:%02d".format(h, m, remS)
+            } else {
+                "%d:%02d".format(m, remS)
+            }
         }
 
         fun updateChipColors() {
@@ -1192,29 +1223,34 @@ class FloatingButtonService : Service() {
             val status = json.optString("status", "Stopped")
             val posMicro = json.optLong("position", 0L)
             val lenMicro = json.optLong("length", 0L)
-            val posSec = if (posMicro > 10000000) posMicro / 1000000L else posMicro
-            val lenSec = if (lenMicro > 10000000) lenMicro / 1000000L else lenMicro
+            val posSec = json.optLong("position_sec", -1L).takeIf { it >= 0 }
+                ?: (if (posMicro > 100_000) posMicro / 1_000_000L else posMicro)
+            val lenSec = json.optLong("length_sec", -1L).takeIf { it >= 0 }
+                ?: (if (lenMicro > 100_000) lenMicro / 1_000_000L else lenMicro)
 
             val vol = json.optInt("volume", 50)
             val muted = json.optBoolean("muted", false)
 
+            currentPosSec = posSec
+            maxDurationSec = lenSec
+            isCurrentlyPlaying = status.equals("Playing", ignoreCase = true)
+
             titleText?.text = if (title.isNotEmpty()) title else "Desktop Media"
-            val sub = listOfNotNull(artist.ifEmpty { null }, album.ifEmpty { null }).joinToString(" • ")
+            val sub = listOfNotNull(artist.ifEmpty { null }, album.ifEmpty { null }).joinToString(" - ")
             artistText?.text = if (sub.isNotEmpty()) sub else (if (status.isNotEmpty()) status else "Ready")
 
             if (!isMediaSeeking) {
                 seekbarMedia?.max = if (lenSec > 0) lenSec.toInt() else 100
                 seekbarMedia?.progress = posSec.toInt()
+                posText?.text = formatTime(posSec)
             }
-            posText?.text = formatTime(posSec)
             durText?.text = formatTime(lenSec)
 
-            val isPlaying = status.equals("Playing", ignoreCase = true)
-            btnPlayPause?.setImageResource(if (isPlaying) R.drawable.ic_pause_white else R.drawable.ic_play_white)
+            btnPlayPause?.setImageResource(if (isCurrentlyPlaying) R.drawable.ic_pause_white else R.drawable.ic_play_white)
 
             if (!isVolumeSeeking) {
                 seekbarVol?.progress = vol
-                percentText?.text = "%"
+                percentText?.text = "${vol}%"
             }
             muteBtn?.setImageResource(if (muted) R.drawable.ic_volume_mute else R.drawable.ic_volume)
 
@@ -1237,29 +1273,15 @@ class FloatingButtonService : Service() {
                         }
                     }
                 }
-
                 if (needsRebuild) {
                     chipsContainer.removeAllViews()
                     for (i in 0 until playersArray.length()) {
                         val pName = playersArray.optString(i)
-                        if (pName.isNullOrEmpty()) continue
                         val chip = Button(this@FloatingButtonService).apply {
+                            text = pName.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
                             tag = pName
-                            val displayName = when {
-                                pName.contains("spotify", ignoreCase = true) -> "Spotify"
-                                pName.contains("brave", ignoreCase = true) -> "Brave"
-                                pName.contains("firefox", ignoreCase = true) -> "Firefox"
-                                pName.contains("vlc", ignoreCase = true) -> "VLC"
-                                pName.contains("plasma", ignoreCase = true) -> "Browser"
-                                else -> pName.split(".").firstOrNull()?.replaceFirstChar { it.uppercase() } ?: pName
-                            }
-                            text = displayName
-                            textSize = 10f
-                            setPadding((8 * density).toInt(), (2 * density).toInt(), (8 * density).toInt(), (2 * density).toInt())
-                            minHeight = (28 * density).toInt()
-                            minimumHeight = (28 * density).toInt()
-                            minWidth = 0
-                            minimumWidth = 0
+                            isAllCaps = false
+                            textSize = 12f
                             val isCurrent = (pName == selectedPlayer) || (selectedPlayer.isEmpty() && i == 0)
                             if (isCurrent) {
                                 setBackgroundColor(Color.parseColor("#38BDF8"))
@@ -1341,7 +1363,7 @@ class FloatingButtonService : Service() {
 
         fun sendVolumeLevel(vol: Int) {
             val clamped = vol.coerceIn(0, 100)
-            percentText?.text = "%"
+            percentText?.text = "${clamped}%"
             if (!isVolumeSeeking) {
                 seekbarVol?.progress = clamped
             }
@@ -1361,18 +1383,18 @@ class FloatingButtonService : Service() {
                         val m = json.optBoolean("muted", false)
                         mainHandler.post {
                             if (!isVolumeSeeking) seekbarVol?.progress = v
-                            percentText?.text = "%"
+                            percentText?.text = "${v}%"
                             muteBtn?.setImageResource(if (m) R.drawable.ic_volume_mute else R.drawable.ic_volume)
                         }
                     }
                     conn.disconnect()
                 } catch (ignored: Exception) {}
-            }.start()
 
-            val defaultSink = sysVolPlugin?.sinks?.firstOrNull()
-            if (defaultSink != null) {
-                sysVolPlugin.sendVolume(defaultSink.name, (clamped * defaultSink.maxVolume) / 100)
-            }
+                val defaultSink = sysVolPlugin?.sinks?.firstOrNull { it.isDefault } ?: sysVolPlugin?.sinks?.firstOrNull()
+                if (defaultSink != null) {
+                    sysVolPlugin?.sendVolume(defaultSink.name, (clamped * defaultSink.maxVolume) / 100)
+                }
+            }.start()
         }
 
         fun sendMuteToggle() {
@@ -1391,12 +1413,17 @@ class FloatingButtonService : Service() {
                         val m = json.optBoolean("muted", false)
                         mainHandler.post {
                             if (!isVolumeSeeking) seekbarVol?.progress = v
-                            percentText?.text = "%"
+                            percentText?.text = "${v}%"
                             muteBtn?.setImageResource(if (m) R.drawable.ic_volume_mute else R.drawable.ic_volume)
                         }
                     }
                     conn.disconnect()
                 } catch (ignored: Exception) {}
+
+                val defaultSink = sysVolPlugin?.sinks?.firstOrNull { it.isDefault } ?: sysVolPlugin?.sinks?.firstOrNull()
+                if (defaultSink != null) {
+                    sysVolPlugin?.sendMute(defaultSink.name, !defaultSink.mute)
+                }
             }.start()
         }
 
@@ -1430,6 +1457,31 @@ class FloatingButtonService : Service() {
 
         fetchMediaStatus()
 
+        var pollCounter = 0
+        mediaUpdateRunnable?.let { mainHandler.removeCallbacks(it) }
+        val runnable = object : Runnable {
+            override fun run() {
+                if (mediaOverlayView == null) return
+
+                if (isCurrentlyPlaying && !isMediaSeeking) {
+                    if (maxDurationSec <= 0 || currentPosSec < maxDurationSec) {
+                        currentPosSec++
+                        seekbarMedia?.progress = currentPosSec.toInt()
+                        posText?.text = formatTime(currentPosSec)
+                    }
+                }
+
+                pollCounter++
+                if (pollCounter % 2 == 0) {
+                    fetchMediaStatus()
+                }
+
+                mainHandler.postDelayed(this, 1000)
+            }
+        }
+        mediaUpdateRunnable = runnable
+        mainHandler.postDelayed(runnable, 1000)
+
         btnPlayPause?.setOnClickListener {
             sendMediaAction("play_pause")
             it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -1457,6 +1509,7 @@ class FloatingButtonService : Service() {
             override fun onStopTrackingTouch(sb: SeekBar?) {
                 isMediaSeeking = false
                 val pos = sb?.progress ?: 0
+                currentPosSec = pos.toLong()
                 sendMediaAction("seek", "position=" + pos)
             }
         })
@@ -1468,7 +1521,7 @@ class FloatingButtonService : Service() {
         seekbarVol?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) {
-                    percentText?.text = "%"
+                    percentText?.text = "${progress}%"
                 }
             }
 
@@ -1508,6 +1561,10 @@ class FloatingButtonService : Service() {
     }
 
     private fun hideMediaOverlay() {
+        mediaUpdateRunnable?.let {
+            mainHandler.removeCallbacks(it)
+            mediaUpdateRunnable = null
+        }
         if (mediaOverlayView == null) return
         val card = mediaOverlayView?.findViewById<View>(R.id.floating_media_card)
         card?.animate()?.scaleX(0.85f)?.scaleY(0.85f)?.alpha(0f)?.setDuration(150)?.withEndAction {

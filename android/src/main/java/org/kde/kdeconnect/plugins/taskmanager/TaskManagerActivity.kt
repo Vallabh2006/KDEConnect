@@ -222,14 +222,14 @@ class TaskManagerActivity : AppCompatActivity() {
                 CommandEntry("C4) Brightness Down", "brightnessctl set 15%- 2>/dev/null || ddcutil setvcp 10 - 15 2>/dev/null", "cmd_c4"),
                 CommandEntry("C5) Backlight On", "brightnessctl -d '*kbd_backlight*' set 100% 2>/dev/null || brightnessctl -d asus::kbd_backlight set 3 2>/dev/null", "cmd_c5"),
                 CommandEntry("C6) Backlight Off", "brightnessctl -d '*kbd_backlight*' set 0% 2>/dev/null || brightnessctl -d asus::kbd_backlight set 0 2>/dev/null", "cmd_c6"),
-                CommandEntry("D2) Screenshot", "spectacle -b -n -o ~/Pictures/Screenshots/\$(date +%F_%H-%M-%S).png 2>/dev/null || grim ~/Pictures/Screenshots/\$(date +%F_%H-%M-%S).png 2>/dev/null", "cmd_d2"),
+                CommandEntry("D2) Screenshot", "mkdir -p ~/Pictures/Screenshots && (spectacle -b -n -o ~/Pictures/Screenshots/\$(date +%F_%H-%M-%S).png 2>/dev/null || grim ~/Pictures/Screenshots/\$(date +%F_%H-%M-%S).png 2>/dev/null || import -window root ~/Pictures/Screenshots/\$(date +%F_%H-%M-%S).png 2>/dev/null)", "cmd_d2"),
                 CommandEntry("D3) Restart KDE Plasma", "kquitapp6 plasmashell 2>/dev/null; sleep 0.5; kstart plasmashell 2>/dev/null &", "cmd_d3"),
                 CommandEntry("E1) Apache, Mysql Start", "sudo systemctl start mariadb httpd 2>/dev/null || sudo systemctl start apache2 mysql 2>/dev/null", "cmd_e1"),
                 CommandEntry("E2) Apache, Mysql Stop", "sudo systemctl stop mariadb httpd 2>/dev/null || sudo systemctl stop apache2 mysql 2>/dev/null", "cmd_e2"),
                 CommandEntry("E3) Bluetooth Stop", "bluetoothctl power off", "cmd_e3"),
                 CommandEntry("E4) Bluetooth Start", "bluetoothctl power on", "cmd_e4"),
                 CommandEntry("F1) Spotify", "setsid -f spotify-launcher >/dev/null 2>&1 || setsid -f spotify >/dev/null 2>&1 &", "cmd_f1"),
-                CommandEntry("Screenshot + Send", "bash -c 'T=/tmp/kde_ss_\$(date +%s).png; (spectacle -b -n -o \$T 2>/dev/null || grim \$T 2>/dev/null); DEV=\$(kdeconnect-cli -a --id-only 2>/dev/null | head -n1); [ -n \"\$DEV\" ] && kdeconnect-cli -d \"\$DEV\" --share \$T 2>/dev/null; rm -f \$T'", "cmd_ss_send"),
+                CommandEntry("Screenshot + Send", "bash -c 'mkdir -p ~/Pictures/Screenshots; T=~/Pictures/Screenshots/Screenshot_\$(date +%Y%m%d_%H%M%S).png; (spectacle -b -n -o \$T 2>/dev/null || grim \$T 2>/dev/null || import -window root \$T 2>/dev/null); DEV=\$(kdeconnect-cli -a --id-only 2>/dev/null | head -n1); [ -n \"\$DEV\" ] && kdeconnect-cli -d \"\$DEV\" --share \$T 2>/dev/null'", "cmd_ss_send"),
                 CommandEntry("Get Clipboard", "bash -c 'DEV=\$(kdeconnect-cli -a --id-only 2>/dev/null | head -n1); CLIP=\$(wl-paste 2>/dev/null || xclip -selection clipboard -o 2>/dev/null || xsel -b -o 2>/dev/null); [ -n \"\$DEV\" ] && [ -n \"\$CLIP\" ] && kdeconnect-cli -d \"\$DEV\" --share-text \"\$CLIP\"'", "cmd_get_clip")
             )
             savePhoneCommands(defaults)

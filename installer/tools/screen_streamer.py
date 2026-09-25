@@ -1480,25 +1480,108 @@ class StreamState:
 stream_state = StreamState()
 start_tcp_mic_server(59002)
 
+def get_desktop_env():
+    env = os.environ.copy()
+    uid = os.getuid()
+    runtime_dir = env.get("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+    env["XDG_RUNTIME_DIR"] = runtime_dir
+    
+    if "DBUS_SESSION_BUS_ADDRESS" not in env:
+        env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={runtime_dir}/bus"
+        
+    if "WAYLAND_DISPLAY" not in env:
+        for w in ["wayland-0", "wayland-1", "wayland-2"]:
+            if os.path.exists(os.path.join(runtime_dir, w)):
+                env["WAYLAND_DISPLAY"] = w
+                break
+        if "WAYLAND_DISPLAY" not in env:
+            env["WAYLAND_DISPLAY"] = "wayland-0"
+            
+    if "DISPLAY" not in env:
+        env["DISPLAY"] = ":0"
+    if "XDG_CURRENT_DESKTOP" not in env:
+        env["XDG_CURRENT_DESKTOP"] = "KDE"
+    if "XDG_SESSION_TYPE" not in env:
+        env["XDG_SESSION_TYPE"] = "wayland" if os.path.exists(os.path.join(runtime_dir, env.get("WAYLAND_DISPLAY", "wayland-0"))) else "x11"
+    if "QT_QPA_PLATFORM" not in env:
+        env["QT_QPA_PLATFORM"] = "wayland;xcb"
+    return env
+
+def capture_desktop_screenshot(output_path):
+    env = get_desktop_env()
+    try:
+        if os.path.exists(output_path):
+            os.remove(output_path)
+    except Exception:
+        pass
+
+    if shutil.which("spectacle"):
+        try:
+            res = subprocess.run(["spectacle", "-b", "-n", "-o", output_path], env=env, timeout=5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if res.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                return True
+        except Exception:
+            pass
+
+    if shutil.which("grim"):
+        try:
+            res = subprocess.run(["grim", output_path], env=env, timeout=5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if res.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                return True
+        except Exception:
+            pass
+
+    if shutil.which("gnome-screenshot"):
+        try:
+            res = subprocess.run(["gnome-screenshot", "-f", output_path], env=env, timeout=5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if res.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                return True
+        except Exception:
+            pass
+
+    for tool in [["import", "-window", "root", output_path], ["scrot", output_path]]:
+        if shutil.which(tool[0]):
+            try:
+                res = subprocess.run(tool, env=env, timeout=5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if res.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                    return True
+            except Exception:
+                pass
+
+    return os.path.exists(output_path) and os.path.getsize(output_path) > 0
+
 class AudioBroadcaster:
     def __init__(self, source_cmd):
         self.source_cmd = source_cmd
         self.clients = []
         self.lock = threading.Lock()
-        self.running = True
-        self.thread = threading.Thread(target=self._capture_loop, daemon=True)
-        self.thread.start()
+        self.running = False
+        self.proc = None
+        self.thread = None
 
     def register(self, q):
         with self.lock:
             self.clients.append(q)
+            if len(self.clients) == 1:
+                self.running = True
+                self.thread = threading.Thread(target=self._capture_loop, daemon=True)
+                self.thread.start()
 
     def unregister(self, q):
         with self.lock:
             if q in self.clients:
                 self.clients.remove(q)
+            if len(self.clients) == 0:
+                self.running = False
+                if self.proc:
+                    try:
+                        self.proc.terminate()
+                    except Exception:
+                        pass
+                    self.proc = None
 
     def _capture_loop(self):
+        env = get_desktop_env()
         while self.running:
             proc = None
             try:
@@ -1506,13 +1589,17 @@ class AudioBroadcaster:
                     self.source_cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL,
-                    bufsize=4096
+                    bufsize=4096,
+                    env=env
                 )
+                self.proc = proc
                 while self.running and proc.poll() is None:
                     data = proc.stdout.read(2048)
                     if not data:
                         break
                     with self.lock:
+                        if not self.clients:
+                            break
                         for q in list(self.clients):
                             try:
                                 q.put_nowait(data)
@@ -1526,6 +1613,9 @@ class AudioBroadcaster:
                         proc.terminate()
                     except Exception:
                         pass
+                self.proc = None
+            if not self.running or not self.clients:
+                break
             time.sleep(0.5)
 
 speaker_broadcaster = AudioBroadcaster([
@@ -1954,7 +2044,9 @@ def get_mpris_status(req_player=""):
         "album": "",
         "status": "Stopped",
         "position": 0,
-        "length": 0
+        "length": 0,
+        "position_sec": 0,
+        "length_sec": 0
     }
 
     if selected_full:
@@ -2006,6 +2098,8 @@ def get_mpris_status(req_player=""):
                     except Exception:
                         pass
 
+    res["position_sec"] = int(res["position"] / 1000000) if res["position"] > 0 else 0
+    res["length_sec"] = int(res["length"] / 1000000) if res["length"] > 0 else 0
     return res
 
 def perform_mpris_action(act, req_player="", pos=0):
@@ -2056,8 +2150,17 @@ def perform_mpris_action(act, req_player="", pos=0):
             meta = subprocess.check_output(["busctl", "--user", "get-property", target_service, "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", "Metadata"], env=env, text=True, timeout=1).strip()
             m_tid = re.search(r'"mpris:trackid"\s+[os]\s+"([^"]+)"', meta)
             track_id = m_tid.group(1) if m_tid else "/org/mpris/MediaPlayer2/CurrentTrack"
+            if not track_id.startswith("/"):
+                track_id = "/" + track_id.replace(":", "/").replace("-", "_")
             microsecs = int(float(pos) * 1000000)
             cmd = ["busctl", "--user", "call", target_service, "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", "SetPosition", "ox", track_id, str(microsecs)]
+            r_seek = subprocess.run(cmd, env=env, timeout=1, capture_output=True)
+            if r_seek.returncode == 0:
+                return True
+            cmd2 = ["busctl", "--user", "call", target_service, "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", "SetPosition", "sx", track_id, str(microsecs)]
+            r_seek2 = subprocess.run(cmd2, env=env, timeout=1, capture_output=True)
+            if r_seek2.returncode == 0:
+                return True
         except Exception:
             return False
 
@@ -2129,27 +2232,31 @@ class StreamHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
 
-        elif path in ["/capture_screenshot", "/screenshot.png", "/screenshot"]:
-            env = os.environ.copy()
-            if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
-            if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{os.getuid()}/bus"
-            ss_path = "/tmp/kdeconnect_screenshot.png"
+        elif path in ['/audio.pcm', '/audio.wav', '/audio.mp3', '/audio']:
+            self.send_response(200)
+            self.send_header('Content-Type', 'audio/l16; rate=44100; channels=2')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            self.end_headers()
+
+            q = queue.Queue(maxsize=100)
+            speaker_broadcaster.register(q)
             try:
-                if os.path.exists(ss_path):
-                    os.remove(ss_path)
-            except Exception:
-                pass
-            try:
-                subprocess.run(["grim", ss_path], env=env, timeout=3, check=True)
-            except Exception:
-                try:
-                    subprocess.run(["spectacle", "-b", "-n", "-o", ss_path], env=env, timeout=3, check=True)
-                except Exception:
+                while stream_state.running:
                     try:
-                        subprocess.run(["import", "-window", "root", ss_path], env=env, timeout=3)
-                    except Exception:
-                        pass
-            if os.path.exists(ss_path) and os.path.getsize(ss_path) > 0:
+                        chunk = q.get(timeout=0.5)
+                        self.wfile.write(chunk)
+                    except queue.Empty:
+                        continue
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            finally:
+                speaker_broadcaster.unregister(q)
+
+        elif path in ["/capture_screenshot", "/screenshot.png", "/screenshot"]:
+            ss_path = "/tmp/kdeconnect_screenshot.png"
+            success = capture_desktop_screenshot(ss_path)
+            if success and os.path.exists(ss_path) and os.path.getsize(ss_path) > 0:
                 with open(ss_path, "rb") as f:
                     img_data = f.read()
                 self.send_response(200)
@@ -2419,26 +2526,9 @@ class StreamHandler(BaseHTTPRequestHandler):
                 stream_state.active_clients = max(0, stream_state.active_clients - 1)
 
         elif path in ["/capture_screenshot", "/screenshot.png", "/screenshot"]:
-            env = os.environ.copy()
-            if "XDG_RUNTIME_DIR" not in env: env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
-            if "DBUS_SESSION_BUS_ADDRESS" not in env: env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{os.getuid()}/bus"
             ss_path = "/tmp/kdeconnect_screenshot.png"
-            try:
-                if os.path.exists(ss_path):
-                    os.remove(ss_path)
-            except Exception:
-                pass
-            try:
-                subprocess.run(["grim", ss_path], env=env, timeout=3, check=True)
-            except Exception:
-                try:
-                    subprocess.run(["spectacle", "-b", "-n", "-o", ss_path], env=env, timeout=3, check=True)
-                except Exception:
-                    try:
-                        subprocess.run(["import", "-window", "root", ss_path], env=env, timeout=3)
-                    except Exception:
-                        pass
-            if os.path.exists(ss_path) and os.path.getsize(ss_path) > 0:
+            success = capture_desktop_screenshot(ss_path)
+            if success and os.path.exists(ss_path) and os.path.getsize(ss_path) > 0:
                 with open(ss_path, "rb") as f:
                     img_data = f.read()
                 self.send_response(200)
